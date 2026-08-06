@@ -1,0 +1,7 @@
+2026/08/06-09:48:03.794 8b88 Reusing MANIFEST C:\Users\robin\OneDrive\Desktop\IDL Live Suite\browser\dartcounter_profile\Default\IndexedDB\https_app.dartcounter.net_0.indexeddb.leveldb/MANIFEST-000001
+2026/08/06-09:48:03.796 8b88 Recovering log #4
+2026/08/06-09:48:03.801 8b88 Reusing old log C:\Users\robin\OneDrive\Desktop\IDL Live Suite\browser\dartcounter_profile\Default\IndexedDB\https_app.dartcounter.net_0.indexeddb.leveldb/000004.log 
+2026/08/06-09:48:03.833 c54 Level-0 table #8: started
+2026/08/06-09:48:03.851 c54 Level-0 table #8: 54305 bytes OK
+2026/08/06-09:48:03.860 c54 Delete type=0 #4
+2026/08/06-09:48:03.863 8b88 Manual compaction at level-0 from '\x00\x05\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x06\x00\x00\x00' @ 0 : 0; will stop at (end)
