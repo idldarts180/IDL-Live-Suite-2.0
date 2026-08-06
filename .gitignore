@@ -1,14 +1,16 @@
-# Python
+# Byte-compiled / optimized
 __pycache__/
-*.pyc
+*.py[cod]
 
-# Virtual environment
+# Virtual environments
 .venv/
+venv/
+env/
 
 # Playwright browser profile
 browser/profile/
 
-# Screenshots
+# Runtime screenshots
 capture/latest.png
 
 # VS Code
