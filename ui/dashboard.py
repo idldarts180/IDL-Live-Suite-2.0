@@ -1,7 +1,7 @@
 """
 IDL Live Suite
 Dashboard
-Version 1.1
+Version 2.0
 """
 
 import customtkinter as ctk
@@ -79,7 +79,7 @@ class Dashboard(ctk.CTk):
 
         self.status = ctk.CTkLabel(
             self,
-            text="Waiting for Scolia...",
+            text="Waiting for provider...",
             font=("Segoe UI", 16)
         )
 
@@ -87,24 +87,24 @@ class Dashboard(ctk.CTk):
 
     # ======================================================
 
-    def update_scores(self, match):
+    def update_match(self, match):
 
         self.player1_name.configure(
-            text=match["player1_name"]
+            text=match.player1_name
         )
 
         self.player2_name.configure(
-            text=match["player2_name"]
+            text=match.player2_name
         )
 
         self.player1_score.configure(
-            text=str(match["player1_score"])
+            text=str(match.player1_score)
         )
 
         self.player2_score.configure(
-            text=str(match["player2_score"])
+            text=str(match.player2_score)
         )
 
         self.status.configure(
-            text="🟢 LIVE"
+            text=f"🟢 LIVE • {match.provider}"
         )

@@ -1,44 +1,84 @@
 """
 IDL Live Suite
-Version 2.0
+Version 2.2
 """
 
 from providers.provider_manager import ProviderManager
+from ui.dashboard import Dashboard
 
 
 def main():
 
+    # -----------------------------------
+    # Choose Provider
+    # -----------------------------------
+
     manager = ProviderManager()
 
-    # Choose your provider
     provider = manager.use_scolia()
     # provider = manager.use_dartcounter()
 
-    # Connect to provider
+    # -----------------------------------
+    # Connect
+    # -----------------------------------
+
     provider.connect()
 
-    # Wait until a match is open
     provider.wait_for_match()
 
-    # Read the live match
-    provider.update()
+    # -----------------------------------
+    # Dashboard
+    # -----------------------------------
 
-    # Get the Match object
-    match = provider.get_match()
+    app = Dashboard()
 
-    print()
-    print("=" * 40)
-    print("MATCH OBJECT")
-    print("=" * 40)
-    print()
+    # -----------------------------------
+    # Live Refresh Loop
+    # -----------------------------------
 
-    print(f"Provider : {match.provider}")
-    print(f"Player 1 : {match.player1_name}")
-    print(f"Player 2 : {match.player2_name}")
-    print(f"Score    : {match.player1_score} - {match.player2_score}")
+    def refresh():
 
-    # Close browser
-    provider.close()
+        provider.update()
+
+        match = provider.get_match()
+
+        app.update_match(match)
+
+        print("\033c", end="")
+
+        print("=" * 45)
+        print("IDL LIVE SUITE")
+        print("=" * 45)
+        print()
+
+        print(f"Provider : {match.provider}")
+
+        print()
+        print(match.player1_name)
+        print(f"Score     : {match.player1_score}")
+        print(f"Average   : {match.player1_average}")
+        print(f"First 9   : {match.player1_first9}")
+        print(f"Checkout  : {match.player1_checkout}%")
+
+        print()
+
+        print(match.player2_name)
+        print(f"Score     : {match.player2_score}")
+        print(f"Average   : {match.player2_average}")
+        print(f"First 9   : {match.player2_first9}")
+        print(f"Checkout  : {match.player2_checkout}%")
+
+        app.after(1000, refresh)
+
+    refresh()
+
+    try:
+
+        app.mainloop()
+
+    finally:
+
+        provider.close()
 
 
 if __name__ == "__main__":

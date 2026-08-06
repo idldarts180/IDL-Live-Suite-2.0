@@ -1,7 +1,7 @@
 """
 IDL Live Suite
 Scolia Provider
-Version 2.0
+Version 2.1
 """
 
 from providers.base_provider import BaseProvider
@@ -39,6 +39,10 @@ class ScoliaProvider(BaseProvider):
 
         page = self.browser.page
 
+        # ==========================================
+        # PLAYER NAMES
+        # ==========================================
+
         try:
 
             names = page.locator("div.styles_nickname__uBJfP")
@@ -50,6 +54,10 @@ class ScoliaProvider(BaseProvider):
 
         except Exception:
             pass
+
+        # ==========================================
+        # PLAYER SCORES
+        # ==========================================
 
         try:
 
@@ -63,6 +71,43 @@ class ScoliaProvider(BaseProvider):
 
                 self.match.player2_score = int(
                     scores.nth(1).inner_text().strip()
+                )
+
+        except Exception:
+            pass
+
+        # ==========================================
+        # LIVE STATS
+        # ==========================================
+
+        try:
+
+            stats = page.locator("span[data-cy^='realtimeStatsValue']")
+
+            if stats.count() >= 6:
+
+                self.match.player1_average = float(
+                    stats.nth(0).inner_text().replace("%", "")
+                )
+
+                self.match.player1_first9 = float(
+                    stats.nth(1).inner_text().replace("%", "")
+                )
+
+                self.match.player1_checkout = float(
+                    stats.nth(2).inner_text().replace("%", "")
+                )
+
+                self.match.player2_average = float(
+                    stats.nth(3).inner_text().replace("%", "")
+                )
+
+                self.match.player2_first9 = float(
+                    stats.nth(4).inner_text().replace("%", "")
+                )
+
+                self.match.player2_checkout = float(
+                    stats.nth(5).inner_text().replace("%", "")
                 )
 
         except Exception:
