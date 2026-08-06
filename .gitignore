@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+
+# Playwright browser profile
+browser/profile/
+
+# Screenshots
+capture/latest.png
+
+# VS Code
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
