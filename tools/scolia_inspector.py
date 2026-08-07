@@ -1,7 +1,7 @@
 """
 IDL Live Suite
 Scolia Inspector
-Version 2.0
+Version 3.0
 """
 
 import sys
@@ -23,45 +23,95 @@ def main():
 
     page = provider.browser.page
 
-    print("\n" + "=" * 70)
+    print("\n" + "=" * 80)
     print("PLAYER NAMES")
-    print("=" * 70)
+    print("=" * 80)
 
-    names = page.locator("div.styles_nickname__uBJfP")
+    try:
 
-    print(f"Found {names.count()} names\n")
+        names = page.locator("div.styles_nickname__uBJfP")
 
-    for i in range(names.count()):
+        print(f"Found {names.count()} names\n")
 
-        print(f"{i}: {names.nth(i).inner_text()}")
+        for i in range(names.count()):
 
-    print("\n" + "=" * 70)
+            print(f"{i}: {names.nth(i).inner_text()}")
+
+    except Exception as e:
+
+        print(e)
+
+    print("\n" + "=" * 80)
     print("PLAYER SCORES")
-    print("=" * 70)
+    print("=" * 80)
 
-    scores = page.locator("span.styles_counter__ZHHHQ")
+    try:
 
-    print(f"Found {scores.count()} scores\n")
+        scores = page.locator("span.styles_counter__ZHHHQ")
 
-    for i in range(scores.count()):
+        print(f"Found {scores.count()} scores\n")
 
-        print(f"{i}: {scores.nth(i).inner_text()}")
+        for i in range(scores.count()):
 
-    print("\n" + "=" * 70)
+            print(f"{i}: {scores.nth(i).inner_text()}")
+
+    except Exception as e:
+
+        print(e)
+
+    print("\n" + "=" * 80)
     print("REALTIME STAT VALUES")
-    print("=" * 70)
+    print("=" * 80)
 
-    stats = page.locator("span[data-cy^='realtimeStatsValue']")
+    try:
 
-    print(f"Found {stats.count()} values\n")
+        values = page.locator("span[data-cy^='realtimeStatsValue_']")
 
-    for i in range(stats.count()):
+        print(f"Found {values.count()} values\n")
 
-        print(f"{i}: {stats.nth(i).inner_text()}")
+        for i in range(values.count()):
 
-    print("\nPress ENTER to close...")
+            print(f"{i}: {values.nth(i).inner_text()}")
 
-    input()
+    except Exception as e:
+
+        print(e)
+
+    print("\n" + "=" * 80)
+    print("LEGS HTML")
+    print("=" * 80)
+
+    try:
+
+        legs = page.locator("text=LEGS")
+
+        print(f"Found {legs.count()} LEGS labels\n")
+
+        for i in range(legs.count()):
+
+            print("=" * 80)
+            print(f"LEGS #{i}")
+            print("=" * 80)
+
+            try:
+
+                html = legs.nth(i).evaluate(
+                    "(e) => e.parentElement.outerHTML"
+                )
+
+                print(html)
+
+            except Exception as err:
+
+                print(err)
+
+            print()
+
+    except Exception as e:
+
+        print(e)
+
+    input("\nPress ENTER to close...")
 
     provider.close()
 

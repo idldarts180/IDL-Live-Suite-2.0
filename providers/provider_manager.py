@@ -1,7 +1,7 @@
 """
 IDL Live Suite
 Provider Manager
-Version 2.0
+Version 3.0
 """
 
 from providers.scolia import ScoliaProvider
@@ -14,18 +14,45 @@ class ProviderManager:
 
         self.provider = None
 
+    # ==========================================
+    # Select Provider
+    # ==========================================
+
     def use_scolia(self):
 
         self.provider = ScoliaProvider()
-
-        return self.provider
 
     def use_dartcounter(self):
 
         self.provider = DartCounterProvider()
 
-        return self.provider
+    # ==========================================
+    # Pass-through Methods
+    # ==========================================
 
-    def get_provider(self):
+    def connect(self):
 
-        return self.provider
+        if self.provider:
+            self.provider.connect()
+
+    def wait_for_match(self):
+
+        if self.provider:
+            self.provider.wait_for_match()
+
+    def update(self):
+
+        if self.provider:
+            self.provider.update()
+
+    def get_match(self):
+
+        if self.provider:
+            return self.provider.get_match()
+
+        return None
+
+    def close(self):
+
+        if self.provider:
+            self.provider.close()

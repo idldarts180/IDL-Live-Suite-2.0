@@ -1,110 +1,124 @@
 """
 IDL Live Suite
 Dashboard
-Version 2.0
+Version 3.0
 """
 
 import customtkinter as ctk
+
+from ui.widgets.header import Header
+from ui.widgets.player_card import PlayerCard
+from ui.widgets.footer import Footer
 
 
 class Dashboard(ctk.CTk):
 
     def __init__(self):
+
         super().__init__()
 
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("blue")
 
         self.title("IDL Live Suite")
-        self.geometry("900x500")
-        self.resizable(False, False)
 
-        # ----------------------------
-        # Title
-        # ----------------------------
+        self.geometry("1000x700")
 
-        title = ctk.CTkLabel(
+        self.minsize(900, 650)
+
+        self.configure(fg_color="#121212")
+
+        # ==========================================
+        # Header
+        # ==========================================
+
+        self.header = Header(self)
+        self.header.pack(fill="x")
+
+        # ==========================================
+        # Main Content
+        # ==========================================
+
+        self.content = ctk.CTkFrame(
             self,
-            text="🎯 IDL LIVE SUITE",
-            font=("Segoe UI", 28, "bold")
-        )
-        title.pack(pady=20)
-
-        # ----------------------------
-        # Main Frame
-        # ----------------------------
-
-        self.main_frame = ctk.CTkFrame(self)
-        self.main_frame.pack(fill="both", expand=True, padx=20, pady=10)
-
-        # ============================
-        # PLAYER 1
-        # ============================
-
-        self.player1_name = ctk.CTkLabel(
-            self.main_frame,
-            text="Player 1",
-            font=("Segoe UI", 24, "bold")
-        )
-        self.player1_name.pack(pady=(30, 5))
-
-        self.player1_score = ctk.CTkLabel(
-            self.main_frame,
-            text="501",
-            font=("Segoe UI", 64, "bold")
-        )
-        self.player1_score.pack()
-
-        # ============================
-        # PLAYER 2
-        # ============================
-
-        self.player2_name = ctk.CTkLabel(
-            self.main_frame,
-            text="Player 2",
-            font=("Segoe UI", 24, "bold")
-        )
-        self.player2_name.pack(pady=(30, 5))
-
-        self.player2_score = ctk.CTkLabel(
-            self.main_frame,
-            text="501",
-            font=("Segoe UI", 64, "bold")
-        )
-        self.player2_score.pack()
-
-        # ----------------------------
-        # Status
-        # ----------------------------
-
-        self.status = ctk.CTkLabel(
-            self,
-            text="Waiting for provider...",
-            font=("Segoe UI", 16)
+            fg_color="transparent"
         )
 
-        self.status.pack(pady=15)
+        self.content.pack(
+            fill="both",
+            expand=True,
+            padx=20,
+            pady=20
+        )
 
-    # ======================================================
+        # ==========================================
+        # Player 1
+        # ==========================================
+
+        self.player1 = PlayerCard(self.content)
+
+        self.player1.pack(
+            fill="x",
+            pady=(0, 20)
+        )
+
+        # ==========================================
+        # Player 2
+        # ==========================================
+
+        self.player2 = PlayerCard(self.content)
+
+        self.player2.pack(
+            fill="x"
+        )
+
+        # ==========================================
+        # Footer
+        # ==========================================
+
+        self.footer = Footer(self)
+
+        self.footer.pack(
+            fill="x",
+            side="bottom"
+        )
+
+    # ==================================================
 
     def update_match(self, match):
 
-        self.player1_name.configure(
-            text=match.player1_name
+        self.header.update_provider(
+            match.provider
         )
 
-        self.player2_name.configure(
-            text=match.player2_name
+        self.footer.update_footer(
+            match.provider
         )
 
-        self.player1_score.configure(
-            text=str(match.player1_score)
+        self.player1.update_player(
+
+            match.player1_name,
+
+            match.player1_score,
+
+            match.player1_average,
+
+            match.player1_first9,
+
+            match.player1_checkout
+
         )
 
-        self.player2_score.configure(
-            text=str(match.player2_score)
-        )
+        self.player2.update_player(
 
-        self.status.configure(
-            text=f"🟢 LIVE • {match.provider}"
+            match.player2_name,
+
+            match.player2_score,
+
+            match.player2_average,
+
+            match.player2_first9,
+
+            match.player2_checkout
+
         )

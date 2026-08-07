@@ -39,78 +39,112 @@ class ScoliaProvider(BaseProvider):
 
         page = self.browser.page
 
-        # ==========================================
-        # PLAYER NAMES
-        # ==========================================
+        # =====================================
+        # Player Names
+        # =====================================
 
         try:
 
-            names = page.locator("div.styles_nickname__uBJfP")
+            names = page.locator(
+                "div.styles_nickname__uBJfP"
+            )
 
             if names.count() >= 2:
 
                 self.match.player1_name = names.nth(0).inner_text().strip()
                 self.match.player2_name = names.nth(1).inner_text().strip()
 
-        except Exception:
+        except:
             pass
 
-        # ==========================================
-        # PLAYER SCORES
-        # ==========================================
+        # =====================================
+        # Scores
+        # =====================================
 
         try:
 
-            scores = page.locator("span.styles_counter__ZHHHQ")
+            scores = page.locator(
+                "span.styles_counter__ZHHHQ"
+            )
 
             if scores.count() >= 2:
 
                 self.match.player1_score = int(
-                    scores.nth(0).inner_text().strip()
+                    scores.nth(0).inner_text()
                 )
 
                 self.match.player2_score = int(
-                    scores.nth(1).inner_text().strip()
+                    scores.nth(1).inner_text()
                 )
 
-        except Exception:
+        except:
             pass
 
-        # ==========================================
-        # LIVE STATS
-        # ==========================================
+        # =====================================
+        # Realtime Stats
+        # =====================================
 
         try:
 
-            stats = page.locator("span[data-cy^='realtimeStatsValue']")
+            stats = page.locator(
+                "span[data-cy^='realtimeStatsValue_']"
+            )
 
             if stats.count() >= 6:
 
-                self.match.player1_average = float(
-                    stats.nth(0).inner_text().replace("%", "")
-                )
+                self.match.player1_average = float(stats.nth(0).inner_text())
 
-                self.match.player1_first9 = float(
-                    stats.nth(1).inner_text().replace("%", "")
-                )
+                self.match.player1_first9 = float(stats.nth(1).inner_text())
 
                 self.match.player1_checkout = float(
                     stats.nth(2).inner_text().replace("%", "")
                 )
 
-                self.match.player2_average = float(
-                    stats.nth(3).inner_text().replace("%", "")
-                )
+                self.match.player2_average = float(stats.nth(3).inner_text())
 
-                self.match.player2_first9 = float(
-                    stats.nth(4).inner_text().replace("%", "")
-                )
+                self.match.player2_first9 = float(stats.nth(4).inner_text())
 
                 self.match.player2_checkout = float(
                     stats.nth(5).inner_text().replace("%", "")
                 )
 
-        except Exception:
+        except:
+            pass
+
+        # =====================================
+        # Match Format
+        # =====================================
+
+        try:
+
+            self.match.match_format = page.locator(
+                "div.styles_topbarRole__RsZ-3"
+            ).inner_text()
+
+        except:
+            pass
+
+        # =====================================
+        # Legs
+        # =====================================
+
+        try:
+
+            legs = page.locator(
+                "div.styles_score__AKlWV div.styles_value__Aj9KV"
+            )
+
+            if legs.count() >= 2:
+
+                self.match.player1_legs = int(
+                    legs.nth(0).inner_text()
+                )
+
+                self.match.player2_legs = int(
+                    legs.nth(1).inner_text()
+                )
+
+        except:
             pass
 
     def get_match(self):

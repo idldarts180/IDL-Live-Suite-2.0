@@ -1,84 +1,63 @@
 """
 IDL Live Suite
-Version 2.2
+Main
+Version 3.0
 """
 
 from providers.provider_manager import ProviderManager
-from ui.dashboard import Dashboard
+from ui.overlay import Overlay
 
 
 def main():
 
-    # -----------------------------------
-    # Choose Provider
-    # -----------------------------------
+    # ==========================================
+    # Provider
+    # ==========================================
 
     manager = ProviderManager()
 
-    provider = manager.use_scolia()
-    # provider = manager.use_dartcounter()
+    # Change this later from the Control Centre
+    manager.use_scolia()
 
-    # -----------------------------------
+    # ==========================================
     # Connect
-    # -----------------------------------
+    # ==========================================
 
-    provider.connect()
+    manager.connect()
 
-    provider.wait_for_match()
+    manager.wait_for_match()
 
-    # -----------------------------------
-    # Dashboard
-    # -----------------------------------
+    # ==========================================
+    # Overlay
+    # ==========================================
 
-    app = Dashboard()
+    overlay = Overlay()
 
-    # -----------------------------------
-    # Live Refresh Loop
-    # -----------------------------------
+    # ==========================================
+    # Refresh Loop
+    # ==========================================
 
     def refresh():
 
-        provider.update()
+        manager.update()
 
-        match = provider.get_match()
+        match = manager.get_match()
 
-        app.update_match(match)
+        if match:
 
-        print("\033c", end="")
+            overlay.update_match(match)
 
-        print("=" * 45)
-        print("IDL LIVE SUITE")
-        print("=" * 45)
-        print()
-
-        print(f"Provider : {match.provider}")
-
-        print()
-        print(match.player1_name)
-        print(f"Score     : {match.player1_score}")
-        print(f"Average   : {match.player1_average}")
-        print(f"First 9   : {match.player1_first9}")
-        print(f"Checkout  : {match.player1_checkout}%")
-
-        print()
-
-        print(match.player2_name)
-        print(f"Score     : {match.player2_score}")
-        print(f"Average   : {match.player2_average}")
-        print(f"First 9   : {match.player2_first9}")
-        print(f"Checkout  : {match.player2_checkout}%")
-
-        app.after(1000, refresh)
+        overlay.after(500, refresh)
 
     refresh()
 
     try:
 
-        app.mainloop()
+        overlay.mainloop()
 
     finally:
 
-        provider.close()
+        manager.close()
 
 
 if __name__ == "__main__":
