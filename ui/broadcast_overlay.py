@@ -4,6 +4,8 @@ Broadcast Overlay V3
 """
 
 import tkinter as tk
+import json
+from pathlib import Path
 import customtkinter as ctk
 
 from ui.theme import *
@@ -17,6 +19,9 @@ from ui.components.logo_badge import LogoBadge
 from ui.components.player_name import PlayerName
 from ui.components.score_text import ScoreText
 from ui.components.centre_info import CentreInfo
+from ui.components.banner import Banner
+
+BANNER_FILE = Path(__file__).resolve().parent/"config"/"banner.json"
 
 
 class BroadcastOverlay(ctk.CTk):
@@ -73,6 +78,7 @@ class BroadcastOverlay(ctk.CTk):
         self.player_name = PlayerName(self.canvas)
         self.score_text = ScoreText(self.canvas)
         self.centre_info = CentreInfo(self.canvas)
+        self.banner = Banner(self.canvas)
 
         # ==========================================
 
@@ -87,6 +93,29 @@ class BroadcastOverlay(ctk.CTk):
         self.bind("<F2>", lambda e: self.editor.toggle())
 
         self.draw()
+        self.refresh_banner()
+
+
+    def refresh_banner(self):
+        """Refresh only the banner text without redrawing the overlay."""
+        try:
+            if "banner" in self.items:
+                self.canvas.itemconfigure(
+                    self.items["banner"],
+                    text=self.load_banner()
+                )
+        except Exception:
+            pass
+
+        self.after(250, self.refresh_banner)
+
+
+    def load_banner(self):
+        try:
+            with open(BANNER_FILE,"r",encoding="utf-8") as f:
+                return json.load(f).get("text","")
+        except Exception:
+            return ""
 
     # ======================================================
 
@@ -245,6 +274,8 @@ class BroadcastOverlay(ctk.CTk):
 
         self.items["legs"] = centre["legs"]
         self.items["format"] = centre["format"]
+
+        self.items["banner"] = self.banner.draw()
 
 
 if __name__ == "__main__":
