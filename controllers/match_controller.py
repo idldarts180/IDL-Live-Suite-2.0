@@ -4,15 +4,31 @@ Match Controller
 """
 
 from providers.scolia import ScoliaProvider
+from providers.dartcounter import DartCounterProvider
 
 
 class MatchController:
 
-    def __init__(self):
+    def __init__(self, provider_name="scolia"):
 
-        self.provider = ScoliaProvider()
+        self.provider_name = provider_name.lower().strip()
+        self.provider = self._create_provider(self.provider_name)
 
         self.connected = False
+
+    # ======================================
+
+    def _create_provider(self, provider_name):
+
+        if provider_name == "scolia":
+            return ScoliaProvider()
+
+        if provider_name == "dartcounter":
+            return DartCounterProvider()
+
+        raise ValueError(
+            f"Unsupported provider: {provider_name}"
+        )
 
     # ======================================
 
@@ -23,12 +39,11 @@ class MatchController:
 
         self.provider.connect()
 
-        # Removed wait_for_match() so the GUI
-        # doesn't pause waiting for Enter.
-
         self.connected = True
 
-        print("Connected to Scolia.")
+        print(
+            f"Connected to {self.provider.provider_name}."
+        )
 
     # ======================================
 
@@ -45,4 +60,7 @@ class MatchController:
 
     def close(self):
 
-        self.provider.close()
+        try:
+            self.provider.close()
+        finally:
+            self.connected = False

@@ -7,6 +7,7 @@ Uses MatchController for live match data without redrawing canvas items.
 """
 
 import tkinter as tk
+import sys
 import customtkinter as ctk
 
 from ui.theme import *
@@ -27,8 +28,10 @@ from controllers.match_controller import MatchController
 
 class BroadcastOverlay(ctk.CTk):
 
-    def __init__(self):
+    def __init__(self, provider_name="scolia"):
         super().__init__()
+
+        self.provider_name = provider_name.lower().strip()
 
         self.title("IDL Live Suite")
         self.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
@@ -80,8 +83,8 @@ class BroadcastOverlay(ctk.CTk):
         # Match Controller
         # ==========================================
 
-        self.controller = MatchController()
-        self.scolia_connected = False
+        self.controller = MatchController(self.provider_name)
+        self.provider_connected = False
 
         # ==========================================
         # Canvas Item Registry
@@ -106,35 +109,35 @@ class BroadcastOverlay(ctk.CTk):
         # Keep banner text live without redrawing overlay.
         self.refresh_banner()
 
-        # Start Scolia connection after the window has appeared.
-        self.after(100, self.connect_scolia)
+        # Start the selected provider connection after the window appears.
+        self.after(100, self.connect_provider)
 
         # Clean up browser when overlay closes.
         self.protocol("WM_DELETE_WINDOW", self.close_overlay)
 
     # ======================================================
-    # Scolia
+    # Live Provider
     # ======================================================
 
-    def connect_scolia(self):
+    def connect_provider(self):
         """
-        Connect the existing MatchController/ScoliaProvider.
+        Connect the selected provider through MatchController.
         If connection fails, keep the overlay open and show waiting state.
         """
 
         try:
             self.controller.connect()
-            self.scolia_connected = True
-            print("Scolia connected to broadcast overlay.")
+            self.provider_connected = True
+            print(f"{self.controller.provider.provider_name} connected to broadcast overlay.")
 
             self.update_match()
 
         except Exception as exc:
-            self.scolia_connected = False
-            print(f"Scolia connection error: {exc}")
+            self.provider_connected = False
+            print(f"{self.provider_name} connection error: {exc}")
 
             # Retry after 2 seconds rather than crashing the overlay.
-            self.after(2000, self.connect_scolia)
+            self.after(2000, self.connect_provider)
 
     # ======================================================
 
@@ -144,7 +147,7 @@ class BroadcastOverlay(ctk.CTk):
         Nothing is redrawn, so F2 selection/positioning stays intact.
         """
 
-        if not self.scolia_connected:
+        if not self.provider_connected:
             return
 
         try:
@@ -191,7 +194,7 @@ class BroadcastOverlay(ctk.CTk):
             ""
         )
 
-        # Fallback until Scolia has supplied a format.
+        # Fallback until the selected provider has supplied a format.
         if not match_format:
             first_to = getattr(match, "first_to", None)
 
@@ -388,5 +391,16 @@ class BroadcastOverlay(ctk.CTk):
 
 
 if __name__ == "__main__":
-    app = BroadcastOverlay()
+    provider = "scolia"
+
+    if len(sys.argv) > 1:
+        provider = sys.argv[1].lower().strip()
+
+    if provider not in ("scolia", "dartcounter"):
+        print(f"Unknown provider '{provider}', defaulting to Scolia.")
+        provider = "scolia"
+
+    print(f"Starting IDL Live Suite overlay with {provider}.")
+
+    app = BroadcastOverlay(provider)
     app.mainloop()
