@@ -20,6 +20,7 @@ from ui.components.shell import Shell
 from ui.components.logo_badge import LogoBadge
 from ui.components.player_name import PlayerName
 from ui.components.score_text import ScoreText
+from ui.components.average_text import AverageText
 from ui.components.centre_info import CentreInfo
 from ui.components.banner import Banner
 
@@ -75,6 +76,9 @@ class BroadcastOverlay(ctk.CTk):
 
         self.left_score = ScoreText(self.canvas)
         self.right_score = ScoreText(self.canvas)
+
+        self.left_average = AverageText(self.canvas)
+        self.right_average = AverageText(self.canvas)
 
         self.centre_info = CentreInfo(self.canvas)
         self.banner = Banner(self.canvas)
@@ -183,6 +187,14 @@ class BroadcastOverlay(ctk.CTk):
 
         self.right_score.update(
             getattr(match, "player2_score", 501)
+        )
+
+        self.left_average.update(
+            getattr(match, "player1_average", 0.0)
+        )
+
+        self.right_average.update(
+            getattr(match, "player2_average", 0.0)
         )
 
         player1_legs = getattr(match, "player1_legs", 0)
@@ -326,6 +338,9 @@ class BroadcastOverlay(ctk.CTk):
         left_score_pos = self.layout.get("left_score")
         right_score_pos = self.layout.get("right_score")
 
+        left_average_pos = self.layout.get("left_average")
+        right_average_pos = self.layout.get("right_average")
+
         # =====================================
         # Player Names
         # =====================================
@@ -356,6 +371,22 @@ class BroadcastOverlay(ctk.CTk):
             right_score_pos["x"],
             right_score_pos["y"],
             501
+        )
+
+        # =====================================
+        # 3-Dart Averages
+        # =====================================
+
+        self.items["left_average"] = self.left_average.draw(
+            left_average_pos["x"],
+            left_average_pos["y"],
+            0.0
+        )
+
+        self.items["right_average"] = self.right_average.draw(
+            right_average_pos["x"],
+            right_average_pos["y"],
+            0.0
         )
 
         # =====================================

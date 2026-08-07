@@ -12,9 +12,8 @@
         "y": 238
     },
     "left_average": {
-        "x": 180,
-        "label_y": 298,
-        "value_y": 320
+        "x": 181,
+        "y": 282
     },
     "right_name": {
         "x": 836,
@@ -25,9 +24,8 @@
         "y": 238
     },
     "right_average": {
-        "x": 775,
-        "label_y": 298,
-        "value_y": 320
+        "x": 839,
+        "y": 282
     },
     "legs": {
         "x": 508,
