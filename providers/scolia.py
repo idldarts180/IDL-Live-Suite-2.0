@@ -1,7 +1,7 @@
 """
 IDL Live Suite
 Scolia Provider
-Version 2.1
+Version 2.3 - Correct active-player dart tracking
 """
 
 from providers.base_provider import BaseProvider
@@ -12,7 +12,6 @@ from browser.playwright import Browser
 class ScoliaProvider(BaseProvider):
 
     def __init__(self):
-
         super().__init__()
 
         self.provider_name = "Scolia"
@@ -20,55 +19,136 @@ class ScoliaProvider(BaseProvider):
         self.match = Match()
         self.match.provider = self.provider_name
 
+        self.match.player1_darts_remaining = 0
+        self.match.player2_darts_remaining = 0
+
         self.browser = Browser(
             profile="browser/profile",
             url="https://game.scoliadarts.com/game"
         )
 
     def connect(self):
-
         self.browser.connect()
-
         print("Connected to Scolia.")
 
     def wait_for_match(self):
-
         input("\nOpen your Scolia match then press ENTER...")
 
-    def update(self):
+    def _update_darts_remaining(self, page):
+        """
+        Detect darts remaining independently for each player.
 
-        page = self.browser.page
-
-        # =====================================
-        # Player Names
-        # =====================================
+        Each player's scores/history container owns its own checkout
+        suggestion placeholders. Counting those placeholders avoids relying
+        on the 'SWITCH PLAYER' text, which is not a reliable active-player
+        marker for both sides.
+        """
 
         try:
+            player_areas = page.locator(
+                "div.styles_scoresAndHistoryContainerMultiple__j8x8N"
+            )
 
+            self.match.player1_darts_remaining = 0
+            self.match.player2_darts_remaining = 0
+
+            if player_areas.count() >= 2:
+                p1_suggestions = player_areas.nth(0).locator(
+                    "div.styles_throwSuggestion__L7zhL"
+                ).count()
+
+                p2_suggestions = player_areas.nth(1).locator(
+                    "div.styles_throwSuggestion__L7zhL"
+                ).count()
+
+                self.match.player1_darts_remaining = max(
+                    0, min(3, p1_suggestions)
+                )
+
+                self.match.player2_darts_remaining = max(
+                    0, min(3, p2_suggestions)
+                )
+
+        except Exception:
+            self.match.player1_darts_remaining = 0
+            self.match.player2_darts_remaining = 0
+
+    def _update_match_scores(self, page):
+        """
+        Read labelled SETS / LEGS score blocks from Scolia.
+
+        In normal leg play Scolia exposes LEGS only.
+        In set play it can expose both SETS and LEGS. We inspect the
+        labels rather than relying on a fixed value order.
+        """
+        try:
+            score_blocks = page.locator(
+                "div.styles_score__AKlWV"
+            )
+
+            labelled_values = []
+
+            for i in range(score_blocks.count()):
+                block = score_blocks.nth(i)
+                text = block.inner_text().strip().upper()
+
+                values = block.locator(
+                    "div.styles_value__Aj9KV"
+                )
+
+                if values.count() < 1:
+                    continue
+
+                try:
+                    value = int(values.nth(0).inner_text().strip())
+                except (TypeError, ValueError):
+                    continue
+
+                if "SETS" in text:
+                    labelled_values.append(("SETS", value))
+                elif "LEGS" in text:
+                    labelled_values.append(("LEGS", value))
+
+            sets = [v for label, v in labelled_values if label == "SETS"]
+            legs = [v for label, v in labelled_values if label == "LEGS"]
+
+            if len(sets) >= 2:
+                self.match.player1_sets = sets[0]
+                self.match.player2_sets = sets[1]
+                self.match.is_set_play = True
+            else:
+                self.match.player1_sets = 0
+                self.match.player2_sets = 0
+                self.match.is_set_play = False
+
+            if len(legs) >= 2:
+                self.match.player1_legs = legs[0]
+                self.match.player2_legs = legs[1]
+
+        except Exception:
+            pass
+
+    def update(self):
+        page = self.browser.page
+
+        try:
             names = page.locator(
                 "div.styles_nickname__uBJfP"
             )
 
             if names.count() >= 2:
-
                 self.match.player1_name = names.nth(0).inner_text().strip()
                 self.match.player2_name = names.nth(1).inner_text().strip()
 
-        except:
+        except Exception:
             pass
 
-        # =====================================
-        # Scores
-        # =====================================
-
         try:
-
             scores = page.locator(
                 "span.styles_counter__ZHHHQ"
             )
 
             if scores.count() >= 2:
-
                 self.match.player1_score = int(
                     scores.nth(0).inner_text()
                 )
@@ -77,80 +157,60 @@ class ScoliaProvider(BaseProvider):
                     scores.nth(1).inner_text()
                 )
 
-        except:
+        except Exception:
             pass
 
-        # =====================================
-        # Realtime Stats
-        # =====================================
+        self._update_darts_remaining(page)
 
         try:
-
             stats = page.locator(
                 "span[data-cy^='realtimeStatsValue_']"
             )
 
             if stats.count() >= 6:
+                self.match.player1_average = float(
+                    stats.nth(0).inner_text()
+                )
 
-                self.match.player1_average = float(stats.nth(0).inner_text())
-
-                self.match.player1_first9 = float(stats.nth(1).inner_text())
+                self.match.player1_first9 = float(
+                    stats.nth(1).inner_text()
+                )
 
                 self.match.player1_checkout = float(
                     stats.nth(2).inner_text().replace("%", "")
                 )
 
-                self.match.player2_average = float(stats.nth(3).inner_text())
+                self.match.player2_average = float(
+                    stats.nth(3).inner_text()
+                )
 
-                self.match.player2_first9 = float(stats.nth(4).inner_text())
+                self.match.player2_first9 = float(
+                    stats.nth(4).inner_text()
+                )
 
                 self.match.player2_checkout = float(
                     stats.nth(5).inner_text().replace("%", "")
                 )
 
-        except:
+        except Exception:
             pass
 
-        # =====================================
-        # Match Format
-        # =====================================
-
         try:
-
             self.match.match_format = page.locator(
                 "div.styles_topbarRole__RsZ-3"
             ).inner_text()
 
-        except:
+        except Exception:
             pass
 
         # =====================================
-        # Legs
+        # Match Score (Sets / Legs)
         # =====================================
 
-        try:
-
-            legs = page.locator(
-                "div.styles_score__AKlWV div.styles_value__Aj9KV"
-            )
-
-            if legs.count() >= 2:
-
-                self.match.player1_legs = int(
-                    legs.nth(0).inner_text()
-                )
-
-                self.match.player2_legs = int(
-                    legs.nth(1).inner_text()
-                )
-
-        except:
-            pass
+        self._update_match_scores(page)
 
     def get_match(self):
-
         return self.match
 
     def close(self):
-
         self.browser.close()

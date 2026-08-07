@@ -121,14 +121,37 @@ class DartCounterProvider(BaseProvider):
     # ======================================================
 
     def _parse_player_from_average_label(self, lines, avg_index):
+        """
+        DartCounter places the player identity/score immediately before
+        the 3-dart-average label. In leg play the tail is usually:
+            name, remaining score, legs
+        In set play there is one extra match-score number:
+            name, remaining score, sets, legs
 
-        if avg_index < 3:
+        We use the detected match format to decide which shape to read.
+        """
+
+        needed = 4 if getattr(self.match, "is_set_play", False) else 3
+
+        if avg_index < needed:
             return None
 
+        if getattr(self.match, "is_set_play", False):
+            name = lines[avg_index - 4]
+            score = self._to_int(lines[avg_index - 3], 501)
+            sets = self._to_int(lines[avg_index - 2], 0)
+            legs = self._to_int(lines[avg_index - 1], 0)
+        else:
+            name = lines[avg_index - 3]
+            score = self._to_int(lines[avg_index - 2], 501)
+            sets = 0
+            legs = self._to_int(lines[avg_index - 1], 0)
+
         player = {
-            "name": lines[avg_index - 3],
-            "score": self._to_int(lines[avg_index - 2], 501),
-            "legs": self._to_int(lines[avg_index - 1], 0),
+            "name": name,
+            "score": score,
+            "sets": sets,
+            "legs": legs,
             "average": 0.0,
             "first9": 0.0,
             "checkout": 0.0,
@@ -151,7 +174,6 @@ class DartCounterProvider(BaseProvider):
                 break
 
         for i in range(avg_index + 1, block_end):
-
             label = lines[i].lower()
 
             if label == "first 9 avg." and i + 1 < block_end:
@@ -185,14 +207,23 @@ class DartCounterProvider(BaseProvider):
         # Match Format
         # ==========================================
 
-        for line in lines[:12]:
+        format_lines = []
+
+        for line in lines[:20]:
             if re.match(
-                r"^(BEST OF|FIRST TO|RACE TO)\s+\d+\s+LEGS?$",
+                r"^(BEST OF|FIRST TO|RACE TO)\s+\d+\s+(LEGS?|SETS?)$",
                 line,
                 flags=re.IGNORECASE
             ):
-                self.match.match_format = line
-                break
+                format_lines.append(line)
+
+        if format_lines:
+            self.match.match_format = " · ".join(format_lines)
+
+        self.match.is_set_play = any(
+            "SET" in line.upper()
+            for line in format_lines
+        )
 
         # ==========================================
         # Players
@@ -224,6 +255,7 @@ class DartCounterProvider(BaseProvider):
         self.match.player1_name = player1["name"]
         self.match.player1_score = player1["score"]
         self.match.player1_legs = player1["legs"]
+        self.match.player1_sets = player1.get("sets", 0)
         self.match.player1_average = player1["average"]
         self.match.player1_first9 = player1["first9"]
         self.match.player1_checkout = player1["checkout"]
@@ -231,6 +263,7 @@ class DartCounterProvider(BaseProvider):
         self.match.player2_name = player2["name"]
         self.match.player2_score = player2["score"]
         self.match.player2_legs = player2["legs"]
+        self.match.player2_sets = player2.get("sets", 0)
         self.match.player2_average = player2["average"]
         self.match.player2_first9 = player2["first9"]
         self.match.player2_checkout = player2["checkout"]

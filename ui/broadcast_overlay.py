@@ -21,6 +21,8 @@ from ui.components.logo_badge import LogoBadge
 from ui.components.player_name import PlayerName
 from ui.components.score_text import ScoreText
 from ui.components.average_text import AverageText
+from ui.components.checkout_text import CheckoutText
+from ui.checkout_engine import get_checkout
 from ui.components.centre_info import CentreInfo
 from ui.components.banner import Banner
 
@@ -79,6 +81,9 @@ class BroadcastOverlay(ctk.CTk):
 
         self.left_average = AverageText(self.canvas)
         self.right_average = AverageText(self.canvas)
+
+        self.left_checkout = CheckoutText(self.canvas)
+        self.right_checkout = CheckoutText(self.canvas)
 
         self.centre_info = CentreInfo(self.canvas)
         self.banner = Banner(self.canvas)
@@ -189,13 +194,41 @@ class BroadcastOverlay(ctk.CTk):
             getattr(match, "player2_score", 501)
         )
 
-        self.left_average.update(
-            getattr(match, "player1_average", 0.0)
+        player1_average = getattr(match, "player1_average", 0.0)
+        player2_average = getattr(match, "player2_average", 0.0)
+
+        player1_checkout_route = get_checkout(
+            getattr(match, "player1_score", 501),
+            getattr(match, "player1_darts_remaining", 3)
         )
 
-        self.right_average.update(
-            getattr(match, "player2_average", 0.0)
+        player2_checkout_route = get_checkout(
+            getattr(match, "player2_score", 501),
+            getattr(match, "player2_darts_remaining", 3)
         )
+
+        # Use the same line for 3DA and checkout information.
+        # If a checkout is available, temporarily hide the average.
+        # As soon as the checkout disappears, restore the live 3DA.
+        if player1_checkout_route:
+            self.canvas.itemconfigure(
+                self.items["left_average"],
+                text=""
+            )
+            self.left_checkout.update(player1_checkout_route)
+        else:
+            self.left_checkout.update("")
+            self.left_average.update(player1_average)
+
+        if player2_checkout_route:
+            self.canvas.itemconfigure(
+                self.items["right_average"],
+                text=""
+            )
+            self.right_checkout.update(player2_checkout_route)
+        else:
+            self.right_checkout.update("")
+            self.right_average.update(player2_average)
 
         player1_legs = getattr(match, "player1_legs", 0)
         player2_legs = getattr(match, "player2_legs", 0)
@@ -218,7 +251,10 @@ class BroadcastOverlay(ctk.CTk):
         self.centre_info.update(
             player1_legs,
             player2_legs,
-            match_format
+            match_format,
+            getattr(match, "player1_sets", 0),
+            getattr(match, "player2_sets", 0),
+            getattr(match, "is_set_play", False)
         )
 
     # ======================================================
@@ -340,6 +376,8 @@ class BroadcastOverlay(ctk.CTk):
 
         left_average_pos = self.layout.get("left_average")
         right_average_pos = self.layout.get("right_average")
+        left_checkout_pos = self.layout.get("left_checkout")
+        right_checkout_pos = self.layout.get("right_checkout")
 
         # =====================================
         # Player Names
@@ -387,6 +425,13 @@ class BroadcastOverlay(ctk.CTk):
             right_average_pos["x"],
             right_average_pos["y"],
             0.0
+        )
+
+        self.items["left_checkout"] = self.left_checkout.draw(
+            left_checkout_pos["x"], left_checkout_pos["y"], ""
+        )
+        self.items["right_checkout"] = self.right_checkout.draw(
+            right_checkout_pos["x"], right_checkout_pos["y"], ""
         )
 
         # =====================================

@@ -1,7 +1,7 @@
 """
 IDL Live Suite
 Match Model
-Version 2.0
+Version 2.1 - Set play support
 """
 
 
@@ -25,6 +25,8 @@ class Match:
         self.player1_first9 = 0.0
         self.player1_checkout = 0.0
         self.player1_legs = 0
+        self.player1_sets = 0
+        self.player1_darts_remaining = 3
 
         # -------------------------
         # Player 2
@@ -36,13 +38,16 @@ class Match:
         self.player2_first9 = 0.0
         self.player2_checkout = 0.0
         self.player2_legs = 0
+        self.player2_sets = 0
+        self.player2_darts_remaining = 3
 
         # -------------------------
         # Match Information
         # -------------------------
 
         self.first_to = 6
-
+        self.match_format = ""
+        self.is_set_play = False
         self.competition = "IDL Exhibition"
 
     def __str__(self):
