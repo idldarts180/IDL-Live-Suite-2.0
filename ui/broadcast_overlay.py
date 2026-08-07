@@ -10,6 +10,7 @@ from ui.theme import *
 from ui.layout import *
 
 from ui.layout_manager import LayoutManager
+from ui.layout_editor import LayoutEditor
 
 from ui.components.shell import Shell
 from ui.components.logo_badge import LogoBadge
@@ -76,6 +77,14 @@ class BroadcastOverlay(ctk.CTk):
         # ==========================================
 
         self.items = {}
+
+        # ==========================================
+        # Layout Editor
+        # ==========================================
+
+        self.editor = LayoutEditor(self)
+
+        self.bind("<F2>", lambda e: self.editor.toggle())
 
         self.draw()
 
