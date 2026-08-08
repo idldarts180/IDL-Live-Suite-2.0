@@ -4,13 +4,9 @@ Result Celebration Visuals
 LEG WIN / SET WIN / WINNER
 """
 
-from pathlib import Path
-
 from PIL import Image, ImageTk
 
-
-PROJECT_DIR = Path(__file__).resolve().parents[2]
-EFFECTS_DIR = PROJECT_DIR / "assets" / "effects"
+from ui.app_paths import EFFECTS_DIR
 
 
 class ResultCelebration:

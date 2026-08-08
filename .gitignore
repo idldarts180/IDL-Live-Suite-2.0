@@ -22,3 +22,6 @@ Thumbs.db
 
 browser/profile/
 browser/dartcounter_profile/
+build/
+dist/
+*.spec

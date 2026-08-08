@@ -12,15 +12,21 @@ from pathlib import Path
 import customtkinter as ctk
 from PIL import Image
 
+from ui.app_paths import (
+    BANNER_FILE,
+    LOGOS_DIR,
+    ICONS_DIR,
+    ensure_runtime_files
+)
+
 
 UI_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = UI_DIR.parent
-CONFIG = UI_DIR / "config" / "banner.json"
 
-IDL_LOGO = PROJECT_DIR / "assets" / "logos" / "idl.png"
-SCOLIA_LOGO = PROJECT_DIR / "assets" / "logos" / "scolia.png"
-DARTCOUNTER_LOGO = PROJECT_DIR / "assets" / "logos" / "dartcounter.png"
-APP_ICON = PROJECT_DIR / "assets" / "icons" / "idl_live_suite.ico"
+IDL_LOGO = LOGOS_DIR / "idl.png"
+SCOLIA_LOGO = LOGOS_DIR / "scolia.png"
+DARTCOUNTER_LOGO = LOGOS_DIR / "dartcounter.png"
+APP_ICON = ICONS_DIR / "idl_live_suite.ico"
 
 APP_BG = "#0B0B0B"
 PANEL_BG = "#141414"
@@ -48,6 +54,8 @@ class MainWindow(ctk.CTk):
                 self.iconbitmap(str(APP_ICON))
             except Exception:
                 pass
+
+        ensure_runtime_files()
 
         self.title("IDL Live Suite")
         self.geometry("1040x780")
@@ -461,17 +469,17 @@ class MainWindow(ctk.CTk):
     # ======================================================
 
     def load_banner(self):
-        CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        ensure_runtime_files()
 
-        if not CONFIG.exists():
-            CONFIG.write_text(
+        if not BANNER_FILE.exists():
+            BANNER_FILE.write_text(
                 json.dumps({"text": ""}, indent=4),
                 encoding="utf-8"
             )
 
         try:
             data = json.loads(
-                CONFIG.read_text(encoding="utf-8")
+                BANNER_FILE.read_text(encoding="utf-8")
             )
         except (json.JSONDecodeError, OSError):
             data = {"text": ""}
@@ -480,9 +488,9 @@ class MainWindow(ctk.CTk):
         self.banner.insert(0, data.get("text", ""))
 
     def save_banner(self):
-        CONFIG.parent.mkdir(parents=True, exist_ok=True)
+        ensure_runtime_files()
 
-        CONFIG.write_text(
+        BANNER_FILE.write_text(
             json.dumps(
                 {"text": self.banner.get().strip()},
                 indent=4
@@ -556,14 +564,43 @@ class MainWindow(ctk.CTk):
         try:
             self.active_provider = provider_name
 
-            self.overlay_process = subprocess.Popen(
-                [
+            # Development mode:
+            #   launch the overlay as a Python module.
+            #
+            # Packaged EXE mode:
+            #   launch the companion IDL Broadcast Overlay.exe
+            #   from the same application folder.
+            if getattr(sys, "frozen", False):
+                overlay_exe = (
+                    Path(sys.executable).resolve().parent
+                    / "IDL Broadcast Overlay.exe"
+                )
+
+                if not overlay_exe.exists():
+                    raise FileNotFoundError(
+                        f"Could not find {overlay_exe.name}"
+                    )
+
+                command = [
+                    str(overlay_exe),
+                    provider_name
+                ]
+
+                working_dir = Path(sys.executable).resolve().parent
+
+            else:
+                command = [
                     sys.executable,
                     "-m",
                     "ui.broadcast_overlay",
                     provider_name
-                ],
-                cwd=PROJECT_DIR
+                ]
+
+                working_dir = PROJECT_DIR
+
+            self.overlay_process = subprocess.Popen(
+                command,
+                cwd=working_dir
             )
 
             display = (

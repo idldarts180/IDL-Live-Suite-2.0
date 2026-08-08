@@ -26,15 +26,15 @@ from ui.components.checkout_text import CheckoutText
 from ui.components.celebration_180 import Celebration180
 from ui.components.result_celebration import ResultCelebration
 from ui.checkout_engine import get_checkout
+from ui.app_paths import ICONS_DIR
 from ui.components.centre_info import CentreInfo
 from ui.components.banner import Banner
 
 from controllers.match_controller import MatchController
 
 
+APP_ICON = ICONS_DIR / "idl_live_suite.ico"
 
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-APP_ICON = PROJECT_DIR / "assets" / "icons" / "idl_live_suite.ico"
 
 class BroadcastOverlay(ctk.CTk):
 
@@ -139,6 +139,11 @@ class BroadcastOverlay(ctk.CTk):
         self._cached_set_target = None
         self._winner_fired = [False, False]
         self._last_match_winner_event = 0
+
+        # Once a match winner is known, keep the overlay on the true final
+        # result even if Scolia/DartCounter immediately leave the live scoring
+        # screen and continue returning stale pre-finish values.
+        self._final_result = None
 
         # ==========================================
         # Layout Editor
@@ -481,6 +486,153 @@ class BroadcastOverlay(ctk.CTk):
             None
         )
 
+    def _reset_final_result_if_new_match(self, match):
+        """
+        Release the final-result lock only when the provider explicitly says
+        that a live scoring screen is active again.
+
+        DartCounter now marks match.match_active=True after it has successfully
+        parsed a live scoring screen. That makes Rematch/new-game detection
+        reliable without confusing the completed result screen for a new match.
+        """
+        if self._final_result is None:
+            return
+
+        if not bool(getattr(match, "match_active", False)):
+            return
+
+        scores = [
+            int(getattr(match, "player1_score", 501) or 0),
+            int(getattr(match, "player2_score", 501) or 0),
+        ]
+
+        # A real new live game has both players back in play. Do not require
+        # legs/sets to be exactly 0 here because DartCounter can populate those
+        # a fraction of a second later than the score panel.
+        if not (scores[0] > 0 and scores[1] > 0):
+            return
+
+        self._final_result = None
+        self._winner_fired = [False, False]
+        self._last_progress = None
+        self._cached_leg_target = None
+        self._cached_set_target = None
+
+        # Consume the provider's current winner-event counter so the previous
+        # game's WINNER event cannot replay in the new match.
+        self._last_match_winner_event = int(
+            getattr(match, "match_winner_event", 0) or 0
+        )
+
+        print("Overlay: new live match detected - final result lock cleared.")
+
+    def _lock_final_result(self, match, winner_index):
+        """
+        Freeze the overlay on the correct completed-match state.
+
+        Both providers can leave their scoring screen before the last DOM
+        refresh contains the final zero and final leg/set count. Once we know
+        the winner, the overlay itself is the safest place to preserve the
+        finished score.
+        """
+        if self._final_result is not None:
+            return
+
+        format_text = getattr(match, "match_format", "") or ""
+
+        parsed_leg_target = self._target_from_format(
+            format_text,
+            "legs"
+        )
+        parsed_set_target = self._target_from_format(
+            format_text,
+            "sets"
+        )
+
+        if parsed_leg_target is not None:
+            self._cached_leg_target = parsed_leg_target
+
+        if parsed_set_target is not None:
+            self._cached_set_target = parsed_set_target
+
+        leg_target = self._cached_leg_target
+        set_target = self._cached_set_target
+
+        is_set_play = bool(
+            getattr(match, "is_set_play", False)
+        )
+
+        scores = [
+            int(getattr(match, "player1_score", 501) or 0),
+            int(getattr(match, "player2_score", 501) or 0),
+        ]
+
+        legs = [
+            int(getattr(match, "player1_legs", 0) or 0),
+            int(getattr(match, "player2_legs", 0) or 0),
+        ]
+
+        sets = [
+            int(getattr(match, "player1_sets", 0) or 0),
+            int(getattr(match, "player2_sets", 0) or 0),
+        ]
+
+        # Winning checkout always finishes on zero.
+        scores[winner_index] = 0
+
+        if is_set_play:
+            if set_target is not None:
+                sets[winner_index] = max(
+                    sets[winner_index],
+                    set_target
+                )
+
+            # Show the completed deciding set rather than the stale
+            # pre-finish leg count when a leg target is known.
+            if leg_target is not None:
+                legs[winner_index] = max(
+                    legs[winner_index],
+                    leg_target
+                )
+        else:
+            if leg_target is not None:
+                legs[winner_index] = max(
+                    legs[winner_index],
+                    leg_target
+                )
+
+        self._final_result = {
+            "winner_index": winner_index,
+            "player1_name": getattr(
+                match,
+                "player1_name",
+                "Player 1"
+            ),
+            "player2_name": getattr(
+                match,
+                "player2_name",
+                "Player 2"
+            ),
+            "player1_score": scores[0],
+            "player2_score": scores[1],
+            "player1_average": getattr(
+                match,
+                "player1_average",
+                0.0
+            ),
+            "player2_average": getattr(
+                match,
+                "player2_average",
+                0.0
+            ),
+            "player1_legs": legs[0],
+            "player2_legs": legs[1],
+            "player1_sets": sets[0],
+            "player2_sets": sets[1],
+            "is_set_play": is_set_play,
+            "match_format": format_text,
+        }
+
     def _check_result_events(self, match):
         """
         Detect LEG WIN, SET WIN and MATCH WIN from the shared Match model.
@@ -506,6 +658,10 @@ class BroadcastOverlay(ctk.CTk):
 
             if winner_index in (0, 1):
                 self._winner_fired[winner_index] = True
+                self._lock_final_result(
+                    match,
+                    winner_index
+                )
                 self._start_result_celebration(
                     winner_index,
                     "winner"
@@ -609,6 +765,10 @@ class BroadcastOverlay(ctk.CTk):
 
             if inferred_winner:
                 self._winner_fired[player_index] = True
+                self._lock_final_result(
+                    match,
+                    player_index
+                )
                 self._start_result_celebration(
                     player_index,
                     "winner"
@@ -627,6 +787,10 @@ class BroadcastOverlay(ctk.CTk):
                 ):
                     if not self._winner_fired[player_index]:
                         self._winner_fired[player_index] = True
+                        self._lock_final_result(
+                            match,
+                            player_index
+                        )
                         self._start_result_celebration(
                             player_index,
                             "winner"
@@ -651,6 +815,10 @@ class BroadcastOverlay(ctk.CTk):
                 ):
                     if not self._winner_fired[player_index]:
                         self._winner_fired[player_index] = True
+                        self._lock_final_result(
+                            match,
+                            player_index
+                        )
                         self._start_result_celebration(
                             player_index,
                             "winner"
@@ -667,78 +835,173 @@ class BroadcastOverlay(ctk.CTk):
     def set_match(self, match):
         """
         Apply a Match model to the persistent overlay components.
+
+        After a winner is known, use the overlay's locked final result instead
+        of stale provider values returned after the scoring page disappears.
         """
+
+        self._reset_final_result_if_new_match(match)
 
         self._check_result_events(match)
         self._check_180_events(match)
 
-        self.left_name.update(
-            getattr(match, "player1_name", "Player 1")
-        )
+        final = self._final_result
 
-        self.right_name.update(
-            getattr(match, "player2_name", "Player 2")
-        )
+        if final is not None:
+            player1_name = final["player1_name"]
+            player2_name = final["player2_name"]
 
-        self.left_score.update(
-            getattr(match, "player1_score", 501)
-        )
+            player1_score = final["player1_score"]
+            player2_score = final["player2_score"]
 
-        self.right_score.update(
-            getattr(match, "player2_score", 501)
-        )
+            player1_average = final["player1_average"]
+            player2_average = final["player2_average"]
 
-        player1_average = getattr(match, "player1_average", 0.0)
-        player2_average = getattr(match, "player2_average", 0.0)
+            player1_legs = final["player1_legs"]
+            player2_legs = final["player2_legs"]
 
-        player1_checkout_route = get_checkout(
-            getattr(match, "player1_score", 501),
-            getattr(match, "player1_darts_remaining", 3)
-        )
+            player1_sets = final["player1_sets"]
+            player2_sets = final["player2_sets"]
 
-        player2_checkout_route = get_checkout(
-            getattr(match, "player2_score", 501),
-            getattr(match, "player2_darts_remaining", 3)
-        )
+            is_set_play = final["is_set_play"]
+            match_format = final["match_format"]
+
+            # No checkout route is relevant after the match is complete.
+            player1_checkout_route = ""
+            player2_checkout_route = ""
+
+        else:
+            player1_name = getattr(
+                match,
+                "player1_name",
+                "Player 1"
+            )
+            player2_name = getattr(
+                match,
+                "player2_name",
+                "Player 2"
+            )
+
+            player1_score = getattr(
+                match,
+                "player1_score",
+                501
+            )
+            player2_score = getattr(
+                match,
+                "player2_score",
+                501
+            )
+
+            player1_average = getattr(
+                match,
+                "player1_average",
+                0.0
+            )
+            player2_average = getattr(
+                match,
+                "player2_average",
+                0.0
+            )
+
+            player1_legs = getattr(
+                match,
+                "player1_legs",
+                0
+            )
+            player2_legs = getattr(
+                match,
+                "player2_legs",
+                0
+            )
+
+            player1_sets = getattr(
+                match,
+                "player1_sets",
+                0
+            )
+            player2_sets = getattr(
+                match,
+                "player2_sets",
+                0
+            )
+
+            is_set_play = getattr(
+                match,
+                "is_set_play",
+                False
+            )
+
+            match_format = getattr(
+                match,
+                "match_format",
+                ""
+            )
+
+            player1_checkout_route = get_checkout(
+                player1_score,
+                getattr(
+                    match,
+                    "player1_darts_remaining",
+                    3
+                )
+            )
+
+            player2_checkout_route = get_checkout(
+                player2_score,
+                getattr(
+                    match,
+                    "player2_darts_remaining",
+                    3
+                )
+            )
+
+        self.left_name.update(player1_name)
+        self.right_name.update(player2_name)
+
+        self.left_score.update(player1_score)
+        self.right_score.update(player2_score)
 
         # Use the same line for 3DA and checkout information.
-        # If a checkout is available, temporarily hide the average.
-        # As soon as the checkout disappears, restore the live 3DA.
         if player1_checkout_route:
             self.canvas.itemconfigure(
                 self.items["left_average"],
                 text=""
             )
-            self.left_checkout.update(player1_checkout_route)
+            self.left_checkout.update(
+                player1_checkout_route
+            )
         else:
             self.left_checkout.update("")
-            self.left_average.update(player1_average)
+            self.left_average.update(
+                player1_average
+            )
 
         if player2_checkout_route:
             self.canvas.itemconfigure(
                 self.items["right_average"],
                 text=""
             )
-            self.right_checkout.update(player2_checkout_route)
+            self.right_checkout.update(
+                player2_checkout_route
+            )
         else:
             self.right_checkout.update("")
-            self.right_average.update(player2_average)
+            self.right_average.update(
+                player2_average
+            )
 
-        player1_legs = getattr(match, "player1_legs", 0)
-        player2_legs = getattr(match, "player2_legs", 0)
-
-        match_format = getattr(
-            match,
-            "match_format",
-            ""
-        )
-
-        # Fallback until the selected provider has supplied a format.
         if not match_format:
-            first_to = getattr(match, "first_to", None)
+            first_to = getattr(
+                match,
+                "first_to",
+                None
+            )
 
             if first_to:
-                match_format = f"Race to {first_to} Legs"
+                match_format = (
+                    f"Race to {first_to} Legs"
+                )
             else:
                 match_format = "Waiting for match"
 
@@ -746,9 +1009,9 @@ class BroadcastOverlay(ctk.CTk):
             player1_legs,
             player2_legs,
             match_format,
-            getattr(match, "player1_sets", 0),
-            getattr(match, "player2_sets", 0),
-            getattr(match, "is_set_play", False)
+            player1_sets,
+            player2_sets,
+            is_set_play
         )
 
     # ======================================================

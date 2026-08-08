@@ -3,13 +3,12 @@ IDL Live Suite
 180 Celebration Visual
 """
 
-from pathlib import Path
-
 from PIL import Image, ImageTk
 
+from ui.app_paths import EFFECTS_DIR
 
-PROJECT_DIR = Path(__file__).resolve().parents[2]
-IMAGE_FILE = PROJECT_DIR / "assets" / "effects" / "180.png"
+
+IMAGE_FILE = EFFECTS_DIR / "180.png"
 
 
 class Celebration180:

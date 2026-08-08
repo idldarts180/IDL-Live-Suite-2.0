@@ -47,9 +47,16 @@ class DartCounterProvider(BaseProvider):
         self._last_active_player_index = None
         self._end_screen_handled = False
 
+        # One-shot diagnostic state. After we have definitely seen a live match,
+        # dump every DartCounter page the first time the live parser disappears.
+        # This tells us exactly what DartCounter renders after the winning dart.
+        self._saw_live_match = False
+        self._post_match_dumped = False
+
         # Explicit event consumed by the overlay.
         self.match.match_winner_event = 0
         self.match.match_winner_player = None
+        self.match.match_active = False
 
     # ======================================================
     # Connection
@@ -73,31 +80,88 @@ class DartCounterProvider(BaseProvider):
 
     def _get_page(self):
         """
-        Return the active DartCounter page.
+        Return the most relevant DartCounter page.
 
-        DartCounter can keep page.url on /dashboard while the visible
-        match content is rendered dynamically, so we do not require
-        /game/match to appear in page.url.
+        Priority:
+        1. Completed-match result screen (Rematch / View details)
+        2. Live scoring screen
+        3. Current/final available page
+
+        This matters because DartCounter can leave a stale live-score page/tab
+        available while navigating the active page to the results screen. If we
+        choose the stale live page first, the overlay freezes on the pre-finish
+        score and never receives the WINNER event.
         """
-
         try:
             pages = self.browser.context.pages
 
-            # Prefer any tab that visibly contains a match.
+            # --------------------------------------------------
+            # 1. Prefer a genuine completed-match screen.
+            # --------------------------------------------------
             for page in reversed(pages):
                 try:
-                    body = page.locator("body").inner_text(timeout=1000)
+                    url = str(page.url).lower()
+
+                    body = page.locator(
+                        "body"
+                    ).inner_text(timeout=1000)
+
+                    body_upper = body.upper()
+
+                    possible_match_url = (
+                        url.endswith("/game/match")
+                        or url.endswith("/local-games/match")
+                    )
+
+                    has_result_controls = (
+                        "REMATCH" in body_upper
+                        and "VIEW DETAILS" in body_upper
+                    )
+
+                    has_live_scoring = (
+                        "TURN TO THROW!" in body_upper
+                        or "3-DART AVG." in body_upper
+                        or "CHECKOUT RATE" in body_upper
+                        or "SUBMIT" in body_upper
+                    )
 
                     if (
-                        "3-dart avg." in body
-                        and ("BEST OF" in body or "FIRST TO" in body or "RACE TO" in body)
+                        possible_match_url
+                        and has_result_controls
+                        and not has_live_scoring
                     ):
                         self.browser.page = page
                         return page
+
                 except Exception:
                     pass
 
-            # Otherwise use the browser's current page.
+            # --------------------------------------------------
+            # 2. Otherwise prefer a visible live match.
+            # --------------------------------------------------
+            for page in reversed(pages):
+                try:
+                    body = page.locator(
+                        "body"
+                    ).inner_text(timeout=1000)
+
+                    if (
+                        "3-dart avg." in body
+                        and (
+                            "BEST OF" in body
+                            or "FIRST TO" in body
+                            or "RACE TO" in body
+                        )
+                    ):
+                        self.browser.page = page
+                        return page
+
+                except Exception:
+                    pass
+
+            # --------------------------------------------------
+            # 3. Fallbacks.
+            # --------------------------------------------------
             if self.browser.page is not None:
                 return self.browser.page
 
@@ -639,6 +703,15 @@ class DartCounterProvider(BaseProvider):
         winner_index = self._winner_index_from_active_name()
 
         if winner_index is not None:
+            # DartCounter navigates away before a final score=0 live frame is
+            # available, so put the winning player into the correct final state.
+            if winner_index == 0:
+                self.match.player1_score = 0
+                self._previous_scores[0] = 0
+            else:
+                self.match.player2_score = 0
+                self._previous_scores[1] = 0
+
             self.match.match_winner_player = winner_index
             self.match.match_winner_event += 1
             self._end_screen_handled = True
@@ -655,6 +728,65 @@ class DartCounterProvider(BaseProvider):
             )
 
         return True
+
+    def _dump_pages_after_live_match(self):
+        """
+        Print a one-shot snapshot of every open DartCounter page after the live
+        scoring DOM disappears. This is diagnostic only and is intentionally
+        limited to one dump so the terminal stays readable.
+        """
+        if self._post_match_dumped:
+            return
+
+        self._post_match_dumped = True
+
+        print("")
+        print("=" * 70)
+        print("DARTCOUNTER POST-MATCH DIAGNOSTIC")
+        print("=" * 70)
+
+        try:
+            pages = list(self.browser.context.pages)
+        except Exception as exc:
+            print(f"Could not read browser pages: {exc}")
+            print("=" * 70)
+            return
+
+        print(f"Open pages: {len(pages)}")
+
+        for index, page in enumerate(pages):
+            try:
+                url = str(page.url)
+            except Exception:
+                url = "<unable to read url>"
+
+            try:
+                title = page.title(timeout=1000)
+            except Exception:
+                title = "<unable to read title>"
+
+            try:
+                body = page.locator("body").inner_text(timeout=1500)
+            except Exception as exc:
+                body = f"<unable to read body: {exc}>"
+
+            # Keep enough content to identify the result screen without dumping
+            # a huge page into the terminal.
+            body_preview = body[:4000]
+
+            print("")
+            print(f"PAGE {index + 1}")
+            print(f"URL: {url}")
+            print(f"TITLE: {title}")
+            print("--- BODY START ---")
+            print(body_preview)
+            print("--- BODY END ---")
+
+        print("")
+        print("=" * 70)
+        print("END DARTCOUNTER POST-MATCH DIAGNOSTIC")
+        print("=" * 70)
+        print("")
 
     # ======================================================
     # Live Update
@@ -683,8 +815,83 @@ class DartCounterProvider(BaseProvider):
 
             parsed = self._parse_body_text(body_text)
 
-            if not parsed:
+            if parsed:
+                # We are definitely back on a live scoring screen. This is
+                # important after Rematch/new game because the overlay can now
+                # safely release its locked final result.
+                self.match.match_active = True
+                self.match.match_winner_player = None
+                self._end_screen_handled = False
+                self._saw_live_match = True
+                self._post_match_dumped = False
+            else:
+                body_upper = body_text.upper()
+
+                # DartCounter's completed local-match screen has now been
+                # confirmed by diagnostic output to contain only the normal
+                # navigation plus:
+                #     Rematch
+                #     View details
+                #
+                # Handle that state directly here. This deliberately does not
+                # depend on a separate page-selection/end-screen timing pass:
+                # the same body text that failed the live parser is the result
+                # screen we need to consume.
+                is_completed_match = (
+                    self._saw_live_match
+                    and "REMATCH" in body_upper
+                    and "VIEW DETAILS" in body_upper
+                )
+
+                if is_completed_match:
+                    self.match.match_active = False
+
+                    if not self._end_screen_handled:
+                        winner_index = self._winner_index_from_active_name()
+
+                        print(
+                            "DartCounter: completed match detected "
+                            "from post-live body."
+                        )
+
+                        if winner_index in (0, 1):
+                            if winner_index == 0:
+                                self.match.player1_score = 0
+                                self._previous_scores[0] = 0
+                            else:
+                                self.match.player2_score = 0
+                                self._previous_scores[1] = 0
+
+                            self.match.match_winner_player = winner_index
+                            self.match.match_winner_event += 1
+                            self._end_screen_handled = True
+
+                            winner_name = (
+                                self.match.player1_name
+                                if winner_index == 0
+                                else self.match.player2_name
+                            )
+
+                            print(
+                                "DartCounter: match finished - "
+                                f"winner detected: {winner_name}"
+                            )
+                        else:
+                            print(
+                                "DartCounter: result screen detected but "
+                                "winner could not be resolved. "
+                                f"last_active_name="
+                                f"{self._last_active_player_name!r}, "
+                                f"last_active_index="
+                                f"{self._last_active_player_index!r}"
+                            )
+
+                    return
+
                 print("DartCounter: live match not detected yet.")
+
+                if self._saw_live_match:
+                    self._dump_pages_after_live_match()
 
         except Exception as exc:
             print(f"DartCounter update error: {exc}")
