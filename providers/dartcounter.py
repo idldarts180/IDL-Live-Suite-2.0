@@ -35,6 +35,22 @@ class DartCounterProvider(BaseProvider):
         # score by exactly 180.
         self._previous_scores = [None, None]
 
+        # Once the two player names have been read successfully, keep them.
+        # DartCounter's live page adds/removes visit/history text after each
+        # submitted turn, which can shift the body-text layout. Anchoring later
+        # reads to the known names makes score tracking stable across turns.
+        self._cached_player_names = [None, None]
+
+        # End-of-match tracking. DartCounter leaves the scoring screen
+        # immediately after the winning submit.
+        self._last_active_player_name = None
+        self._last_active_player_index = None
+        self._end_screen_handled = False
+
+        # Explicit event consumed by the overlay.
+        self.match.match_winner_event = 0
+        self.match.match_winner_player = None
+
     # ======================================================
     # Connection
     # ======================================================
@@ -125,7 +141,12 @@ class DartCounterProvider(BaseProvider):
 
     # ======================================================
 
-    def _parse_player_from_average_label(self, lines, avg_index):
+    def _parse_player_from_average_label(
+        self,
+        lines,
+        avg_index,
+        player_index
+    ):
         """
         Robust DartCounter player parser.
 
@@ -176,31 +197,43 @@ class DartCounterProvider(BaseProvider):
 
         name_index = None
 
-        # Work backwards so we find the player identity nearest this stats block.
-        for local_index in range(len(block) - 1, -1, -1):
-            candidate = block[local_index].strip()
-            upper = candidate.upper()
+        cached_name = self._cached_player_names[player_index]
 
-            if not candidate:
-                continue
+        # After the first successful read, anchor the block to the exact
+        # player name. This avoids DartCounter visit/history text being
+        # mistaken for the player identity after the first three darts.
+        if cached_name:
+            for local_index in range(len(block) - 1, -1, -1):
+                if block[local_index].strip() == cached_name:
+                    name_index = local_index
+                    break
 
-            if is_number(candidate):
-                continue
+        # First read / fallback: discover the nearest sensible name.
+        if name_index is None:
+            for local_index in range(len(block) - 1, -1, -1):
+                candidate = block[local_index].strip()
+                upper = candidate.upper()
 
-            if is_checkout_token(candidate):
-                continue
+                if not candidate:
+                    continue
 
-            if upper in blocked_names:
-                continue
+                if is_number(candidate):
+                    continue
 
-            if any(
-                upper.startswith(prefix)
-                for prefix in ("BEST OF ", "FIRST TO ", "RACE TO ")
-            ):
-                continue
+                if is_checkout_token(candidate):
+                    continue
 
-            name_index = local_index
-            break
+                if upper in blocked_names:
+                    continue
+
+                if any(
+                    upper.startswith(prefix)
+                    for prefix in ("BEST OF ", "FIRST TO ", "RACE TO ")
+                ):
+                    continue
+
+                name_index = local_index
+                break
 
         if name_index is None:
             return None
@@ -351,10 +384,11 @@ class DartCounterProvider(BaseProvider):
 
         players = []
 
-        for avg_index in average_indexes[:2]:
+        for player_index, avg_index in enumerate(average_indexes[:2]):
             player = self._parse_player_from_average_label(
                 lines,
-                avg_index
+                avg_index,
+                player_index
             )
 
             if player:
@@ -377,6 +411,9 @@ class DartCounterProvider(BaseProvider):
             or not self._valid_player_name(player2["name"])
         ):
             return False
+
+        self._cached_player_names[0] = player1["name"]
+        self._cached_player_names[1] = player2["name"]
 
         self.match.player1_name = player1["name"]
         self.match.player1_score = player1["score"]
@@ -423,6 +460,202 @@ class DartCounterProvider(BaseProvider):
 
             self._previous_scores[index] = current
 
+    @staticmethod
+    def _normalise_name(value):
+        return " ".join(
+            str(value).strip().upper().split()
+        )
+
+    def _update_active_player_from_page(self, page):
+        """
+        Resolve the active DartCounter player from the visible:
+            <NAME>'S TURN TO THROW!
+
+        Use the cached player names from the live score parser. This avoids
+        fuzzy matching accidentally resolving Player 2 as Player 1.
+        """
+        try:
+            body_text = page.locator("body").inner_text(timeout=1000)
+
+            active_match = re.search(
+                r"(?im)^(.+?)['’]S TURN TO THROW!\s*$",
+                body_text
+            )
+
+            if not active_match:
+                return
+
+            active_name = active_match.group(1).strip()
+            self._last_active_player_name = active_name
+
+            active = self._normalise_name(active_name)
+
+            # Prefer the parser's cached names because these are the exact
+            # names belonging to player slots 0 and 1.
+            names = [
+                self._normalise_name(
+                    self._cached_player_names[0]
+                    or getattr(self.match, "player1_name", "")
+                ),
+                self._normalise_name(
+                    self._cached_player_names[1]
+                    or getattr(self.match, "player2_name", "")
+                ),
+            ]
+
+            resolved = None
+
+            # Exact name match first.
+            for index, name in enumerate(names):
+                if name and active == name:
+                    resolved = index
+                    break
+
+            # Only use containment if exact matching failed.
+            if resolved is None:
+                matches = []
+
+                for index, name in enumerate(names):
+                    if not name:
+                        continue
+
+                    if active in name or name in active:
+                        matches.append(index)
+
+                # Use containment only if it identifies exactly one player.
+                if len(matches) == 1:
+                    resolved = matches[0]
+
+            # DartCounter fallback wording if it ever appears.
+            if resolved is None:
+                if "OPPONENT" in active:
+                    resolved = 1
+                elif active in {"YOU", "YOUR", "HOME"}:
+                    resolved = 0
+
+            if resolved in (0, 1):
+                if resolved != self._last_active_player_index:
+                    print(
+                        "DartCounter: active player -> "
+                        f"Player {resolved + 1} ({active_name})"
+                    )
+
+                self._last_active_player_index = resolved
+
+        except Exception as exc:
+            print(f"DartCounter active-player detection error: {exc}")
+
+    def _winner_index_from_active_name(self):
+        """
+        The active player index is resolved while the live score screen is
+        still visible. Carry that exact slot across the instant navigation to
+        DartCounter's Rematch/View details screen.
+        """
+        if self._last_active_player_index in (0, 1):
+            return self._last_active_player_index
+
+        # Defensive exact-name fallback.
+        active = self._normalise_name(
+            self._last_active_player_name
+        )
+
+        names = [
+            self._normalise_name(
+                self._cached_player_names[0]
+                or getattr(self.match, "player1_name", "")
+            ),
+            self._normalise_name(
+                self._cached_player_names[1]
+                or getattr(self.match, "player2_name", "")
+            ),
+        ]
+
+        for index, name in enumerate(names):
+            if active and name and active == name:
+                return index
+
+        return None
+
+    def _check_end_of_match_screen(self, page):
+        """
+        Detect DartCounter's actual completed-match summary screen.
+
+        IMPORTANT:
+        The live scoring page can itself use a /game/match or
+        /local-games/match URL, so URL alone is NOT enough to identify the
+        end of the match. The previous version returned early on that URL and
+        stopped player names/scores updating.
+
+        The diagnostic showed the completed-match screen contains:
+            Rematch
+            View details
+
+        and no longer contains normal live-scoring content.
+        """
+        try:
+            url = str(page.url).lower()
+
+            body_text = page.locator(
+                "body"
+            ).inner_text(timeout=1000)
+
+            body_upper = body_text.upper()
+
+        except Exception:
+            return False
+
+        possible_match_url = (
+            url.endswith("/game/match")
+            or url.endswith("/local-games/match")
+        )
+
+        has_result_controls = (
+            "REMATCH" in body_upper
+            and "VIEW DETAILS" in body_upper
+        )
+
+        # Live scoring commonly contains one or more of these. Their presence
+        # means we must continue using the normal score parser.
+        has_live_scoring = (
+            "TURN TO THROW!" in body_upper
+            or "3-DART AVG." in body_upper
+            or "CHECKOUT RATE" in body_upper
+            or "SUBMIT" in body_upper
+        )
+
+        is_end_screen = (
+            possible_match_url
+            and has_result_controls
+            and not has_live_scoring
+        )
+
+        if not is_end_screen:
+            self._end_screen_handled = False
+            return False
+
+        if self._end_screen_handled:
+            return True
+
+        winner_index = self._winner_index_from_active_name()
+
+        if winner_index is not None:
+            self.match.match_winner_player = winner_index
+            self.match.match_winner_event += 1
+            self._end_screen_handled = True
+
+            winner_name = (
+                self.match.player1_name
+                if winner_index == 0
+                else self.match.player2_name
+            )
+
+            print(
+                "DartCounter: match finished - "
+                f"winner detected: {winner_name}"
+            )
+
+        return True
+
     # ======================================================
     # Live Update
     # ======================================================
@@ -432,6 +665,15 @@ class DartCounterProvider(BaseProvider):
         page = self._get_page()
 
         if page is None:
+            return
+
+        # Capture the active thrower continuously. This survives the final
+        # navigation even though the live score panel disappears.
+        self._update_active_player_from_page(page)
+
+        # Detect DartCounter's dedicated end-of-match page before attempting
+        # the normal live-match parser.
+        if self._check_end_of_match_screen(page):
             return
 
         try:

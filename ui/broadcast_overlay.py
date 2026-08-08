@@ -23,6 +23,7 @@ from ui.components.score_text import ScoreText
 from ui.components.average_text import AverageText
 from ui.components.checkout_text import CheckoutText
 from ui.components.celebration_180 import Celebration180
+from ui.components.result_celebration import ResultCelebration
 from ui.checkout_engine import get_checkout
 from ui.components.centre_info import CentreInfo
 from ui.components.banner import Banner
@@ -89,6 +90,9 @@ class BroadcastOverlay(ctk.CTk):
         self.left_180 = Celebration180(self.canvas)
         self.right_180 = Celebration180(self.canvas)
 
+        self.left_result = ResultCelebration(self.canvas)
+        self.right_result = ResultCelebration(self.canvas)
+
         self.centre_info = CentreInfo(self.canvas)
         self.banner = Banner(self.canvas)
 
@@ -109,6 +113,21 @@ class BroadcastOverlay(ctk.CTk):
         # Track provider event counters so each 180 celebration fires once.
         self._last_180_events = [0, 0]
         self._celebrating_180 = [False, False]
+
+        # Match-progress celebrations are provider-independent. Both
+        # Scolia and DartCounter already populate legs/sets in Match.
+        self._last_progress = None
+        self._result_celebrating = [False, False]
+        self._result_finish_jobs = [None, None]
+        self._pending_leg_jobs = [None, None]
+
+        # Keep the match-winning targets once we have read them. Some
+        # platforms briefly clear/change their format text as the match ends,
+        # which previously meant the final WINNER event could lose the target.
+        self._cached_leg_target = None
+        self._cached_set_target = None
+        self._winner_fired = [False, False]
+        self._last_match_winner_event = 0
 
         # ==========================================
         # Layout Editor
@@ -187,7 +206,10 @@ class BroadcastOverlay(ctk.CTk):
         180 visual, pulse it, then reveal the updated remaining score.
         """
 
-        if self._celebrating_180[player_index]:
+        if (
+            self._celebrating_180[player_index]
+            or self._result_celebrating[player_index]
+        ):
             return
 
         self._celebrating_180[player_index] = True
@@ -221,7 +243,10 @@ class BroadcastOverlay(ctk.CTk):
             visual = self.right_180
 
         visual.hide()
-        self.canvas.itemconfigure(score_item, state="normal")
+
+        if not self._result_celebrating[player_index]:
+            self.canvas.itemconfigure(score_item, state="normal")
+
         self._celebrating_180[player_index] = False
 
     def _check_180_events(self, match):
@@ -238,11 +263,402 @@ class BroadcastOverlay(ctk.CTk):
                 # Defensive reset if a provider/model is restarted.
                 self._last_180_events[index] = event_value
 
+    @staticmethod
+    def _target_from_format(format_text, unit):
+        """
+        Return the number of legs/sets needed to win the match.
+
+        Examples:
+            RACE TO 3 LEGS  -> 3
+            FIRST TO 4 LEGS -> 4
+            BEST OF 5 LEGS  -> 3
+            BEST OF 3 SETS  -> 2
+        """
+        import re
+
+        text = str(format_text).upper()
+        unit_pattern = "SETS?" if unit == "sets" else "LEGS?"
+
+        direct = re.search(
+            rf"(?:RACE TO|FIRST TO)\s+(\d+)\s+{unit_pattern}",
+            text
+        )
+
+        if direct:
+            return int(direct.group(1))
+
+        best_of = re.search(
+            rf"BEST OF\s+(\d+)\s+{unit_pattern}",
+            text
+        )
+
+        if best_of:
+            total = int(best_of.group(1))
+            return (total // 2) + 1
+
+        return None
+
+    def _cancel_pending_leg(self, player_index):
+        job = self._pending_leg_jobs[player_index]
+
+        if job is not None:
+            try:
+                self.after_cancel(job)
+            except Exception:
+                pass
+
+            self._pending_leg_jobs[player_index] = None
+
+    def _schedule_leg_win(self, player_index):
+        """
+        In set play, briefly wait before showing LEG WIN.
+
+        Some providers update the leg and set score in separate DOM refreshes.
+        The short delay gives SET WIN / WINNER a chance to replace the pending
+        leg celebration instead of showing two graphics for the same dart.
+        """
+        self._cancel_pending_leg(player_index)
+
+        self._pending_leg_jobs[player_index] = self.after(
+            400,
+            lambda index=player_index: self._fire_pending_leg(index)
+        )
+
+    def _fire_pending_leg(self, player_index):
+        self._pending_leg_jobs[player_index] = None
+        self._start_result_celebration(player_index, "leg")
+
+    def _hide_player_text(self, player_index):
+        if player_index == 0:
+            keys = (
+                "left_name",
+                "left_score",
+                "left_average",
+                "left_checkout",
+            )
+        else:
+            keys = (
+                "right_name",
+                "right_score",
+                "right_average",
+                "right_checkout",
+            )
+
+        for key in keys:
+            item = self.items.get(key)
+            if item is not None:
+                self.canvas.itemconfigure(item, state="hidden")
+
+    def _restore_player_text(self, player_index):
+        if player_index == 0:
+            keys = (
+                "left_name",
+                "left_score",
+                "left_average",
+                "left_checkout",
+            )
+        else:
+            keys = (
+                "right_name",
+                "right_score",
+                "right_average",
+                "right_checkout",
+            )
+
+        for key in keys:
+            item = self.items.get(key)
+            if item is not None:
+                self.canvas.itemconfigure(item, state="normal")
+
+    def _start_result_celebration(self, player_index, kind):
+        """
+        Celebration priority:
+            WINNER > SET WIN > LEG WIN
+
+        The graphic temporarily takes over the whole player circle, then the
+        normal name / score / 3DA-or-checkout stack returns.
+        """
+        priorities = {
+            "leg": 1,
+            "set": 2,
+            "winner": 3,
+        }
+
+        durations = {
+            "leg": 1500,
+            "set": 2000,
+            "winner": 3000,
+        }
+
+        self._cancel_pending_leg(player_index)
+
+        if player_index == 0:
+            visual = self.left_result
+        else:
+            visual = self.right_result
+
+        current = getattr(
+            self,
+            "_active_result_kind_" + str(player_index),
+            None
+        )
+
+        # Do not let a lower-priority event replace a stronger one.
+        if (
+            current is not None
+            and priorities.get(current, 0) > priorities.get(kind, 0)
+        ):
+            return
+
+        old_job = self._result_finish_jobs[player_index]
+
+        if old_job is not None:
+            try:
+                self.after_cancel(old_job)
+            except Exception:
+                pass
+
+        setattr(
+            self,
+            "_active_result_kind_" + str(player_index),
+            kind
+        )
+
+        self._result_celebrating[player_index] = True
+
+        # A result event supersedes a score-level 180 visual if one somehow
+        # overlaps during a provider refresh.
+        if player_index == 0:
+            self.left_180.hide()
+        else:
+            self.right_180.hide()
+
+        self._hide_player_text(player_index)
+
+        visual.show(kind)
+
+        self.after(
+            90,
+            lambda v=visual, k=kind: v.set_large(k)
+        )
+
+        self.after(
+            220,
+            lambda v=visual, k=kind: v.set_normal(k)
+        )
+
+        self._result_finish_jobs[player_index] = self.after(
+            durations[kind],
+            lambda index=player_index: self._finish_result_celebration(index)
+        )
+
+    def _finish_result_celebration(self, player_index):
+        if player_index == 0:
+            visual = self.left_result
+        else:
+            visual = self.right_result
+
+        visual.hide()
+        self._restore_player_text(player_index)
+
+        self._result_finish_jobs[player_index] = None
+        self._result_celebrating[player_index] = False
+
+        setattr(
+            self,
+            "_active_result_kind_" + str(player_index),
+            None
+        )
+
+    def _check_result_events(self, match):
+        """
+        Detect LEG WIN, SET WIN and MATCH WIN from the shared Match model.
+
+        This is intentionally in the overlay rather than in either provider,
+        so Scolia and DartCounter behave identically.
+        """
+        # Provider-level winner event. DartCounter needs this because it
+        # navigates away from the score screen before its final leg/score
+        # counters can be read.
+        explicit_winner_event = int(
+            getattr(match, "match_winner_event", 0) or 0
+        )
+
+        if explicit_winner_event > self._last_match_winner_event:
+            self._last_match_winner_event = explicit_winner_event
+
+            winner_index = getattr(
+                match,
+                "match_winner_player",
+                None
+            )
+
+            if winner_index in (0, 1):
+                self._winner_fired[winner_index] = True
+                self._start_result_celebration(
+                    winner_index,
+                    "winner"
+                )
+
+        legs = [
+            int(getattr(match, "player1_legs", 0) or 0),
+            int(getattr(match, "player2_legs", 0) or 0),
+        ]
+
+        sets = [
+            int(getattr(match, "player1_sets", 0) or 0),
+            int(getattr(match, "player2_sets", 0) or 0),
+        ]
+
+        scores = [
+            int(getattr(match, "player1_score", 501) or 0),
+            int(getattr(match, "player2_score", 501) or 0),
+        ]
+
+        is_set_play = bool(
+            getattr(match, "is_set_play", False)
+        )
+
+        format_text = getattr(match, "match_format", "")
+
+        current = (
+            legs[0],
+            legs[1],
+            sets[0],
+            sets[1],
+            is_set_play,
+        )
+
+        # Seed on first valid update. This prevents celebrations firing when
+        # the overlay is opened halfway through an already-running match.
+        if self._last_progress is None:
+            self._last_progress = current
+            return
+
+        previous = self._last_progress
+
+        prev_legs = [previous[0], previous[1]]
+        prev_sets = [previous[2], previous[3]]
+
+        parsed_set_target = self._target_from_format(
+            format_text,
+            "sets"
+        )
+
+        parsed_leg_target = self._target_from_format(
+            format_text,
+            "legs"
+        )
+
+        # Cache valid targets for the lifetime of the match. The final
+        # DartCounter/Scolia refresh can remove the format text at exactly the
+        # moment the winning leg/set is awarded, so relying only on the current
+        # DOM caused LEG WIN / SET WIN to work but WINNER to be missed.
+        if parsed_set_target is not None:
+            self._cached_set_target = parsed_set_target
+
+        if parsed_leg_target is not None:
+            self._cached_leg_target = parsed_leg_target
+
+        set_target = self._cached_set_target
+        leg_target = self._cached_leg_target
+
+        # IMPORTANT:
+        # On the final dart, DartCounter/Scolia can leave the live-match page
+        # before the final leg/set counter reaches the overlay. That means
+        # waiting only for "legs increased" or "sets increased" can miss the
+        # match winner completely.
+        #
+        # We can safely infer the match-winning dart while score == 0:
+        # - leg play: player was already one leg from the match target
+        # - set play: player was already one set from the match target AND
+        #   one leg from the set target
+        #
+        # This happens before the provider has a chance to leave/reset the
+        # match screen, so WINNER is not lost on the final refresh.
+        for player_index in (0, 1):
+            if self._winner_fired[player_index]:
+                continue
+
+            inferred_winner = False
+
+            if scores[player_index] == 0:
+                if not is_set_play:
+                    inferred_winner = (
+                        leg_target is not None
+                        and legs[player_index] >= leg_target - 1
+                    )
+                else:
+                    inferred_winner = (
+                        set_target is not None
+                        and leg_target is not None
+                        and sets[player_index] >= set_target - 1
+                        and legs[player_index] >= leg_target - 1
+                    )
+
+            if inferred_winner:
+                self._winner_fired[player_index] = True
+                self._start_result_celebration(
+                    player_index,
+                    "winner"
+                )
+
+        for player_index in (0, 1):
+            set_increased = sets[player_index] > prev_sets[player_index]
+            leg_increased = legs[player_index] > prev_legs[player_index]
+
+            if is_set_play:
+                # Match winner beats every other celebration.
+                if (
+                    set_increased
+                    and set_target is not None
+                    and sets[player_index] >= set_target
+                ):
+                    if not self._winner_fired[player_index]:
+                        self._winner_fired[player_index] = True
+                        self._start_result_celebration(
+                            player_index,
+                            "winner"
+                        )
+
+                # A set win supersedes a leg win on the same finishing dart.
+                elif set_increased:
+                    self._start_result_celebration(
+                        player_index,
+                        "set"
+                    )
+
+                elif leg_increased:
+                    self._schedule_leg_win(player_index)
+
+            else:
+                # Leg-play match winner.
+                if (
+                    leg_increased
+                    and leg_target is not None
+                    and legs[player_index] >= leg_target
+                ):
+                    if not self._winner_fired[player_index]:
+                        self._winner_fired[player_index] = True
+                        self._start_result_celebration(
+                            player_index,
+                            "winner"
+                        )
+
+                elif leg_increased:
+                    self._start_result_celebration(
+                        player_index,
+                        "leg"
+                    )
+
+        self._last_progress = current
+
     def set_match(self, match):
         """
         Apply a Match model to the persistent overlay components.
         """
 
+        self._check_result_events(match)
         self._check_180_events(match)
 
         self.left_name.update(
@@ -488,6 +904,20 @@ class BroadcastOverlay(ctk.CTk):
         )
 
         self.items["right_180"] = self.right_180.draw(
+            right_score_pos["x"],
+            right_score_pos["y"]
+        )
+
+        # =====================================
+        # Result Celebration Visuals
+        # =====================================
+
+        self.items["left_result"] = self.left_result.draw(
+            left_score_pos["x"],
+            left_score_pos["y"]
+        )
+
+        self.items["right_result"] = self.right_result.draw(
             right_score_pos["x"],
             right_score_pos["y"]
         )
