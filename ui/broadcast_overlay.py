@@ -8,6 +8,7 @@ Uses MatchController for live match data without redrawing canvas items.
 
 import tkinter as tk
 import sys
+from pathlib import Path
 import customtkinter as ctk
 
 from ui.theme import *
@@ -31,10 +32,20 @@ from ui.components.banner import Banner
 from controllers.match_controller import MatchController
 
 
+
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+APP_ICON = PROJECT_DIR / "assets" / "icons" / "idl_live_suite.ico"
+
 class BroadcastOverlay(ctk.CTk):
 
     def __init__(self, provider_name="scolia"):
         super().__init__()
+
+        if APP_ICON.exists():
+            try:
+                self.iconbitmap(str(APP_ICON))
+            except Exception:
+                pass
 
         self.provider_name = provider_name.lower().strip()
 

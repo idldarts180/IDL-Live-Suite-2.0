@@ -20,6 +20,7 @@ CONFIG = UI_DIR / "config" / "banner.json"
 IDL_LOGO = PROJECT_DIR / "assets" / "logos" / "idl.png"
 SCOLIA_LOGO = PROJECT_DIR / "assets" / "logos" / "scolia.png"
 DARTCOUNTER_LOGO = PROJECT_DIR / "assets" / "logos" / "dartcounter.png"
+APP_ICON = PROJECT_DIR / "assets" / "icons" / "idl_live_suite.ico"
 
 APP_BG = "#0B0B0B"
 PANEL_BG = "#141414"
@@ -41,6 +42,12 @@ class MainWindow(ctk.CTk):
 
     def __init__(self):
         super().__init__()
+
+        if APP_ICON.exists():
+            try:
+                self.iconbitmap(str(APP_ICON))
+            except Exception:
+                pass
 
         self.title("IDL Live Suite")
         self.geometry("1040x780")
