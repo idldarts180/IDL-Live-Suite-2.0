@@ -27,6 +27,12 @@ class ScoliaProvider(BaseProvider):
             url="https://game.scoliadarts.com/game"
         )
 
+        # A player becomes armed for a new 180 only after Scolia shows
+        # fewer than three populated darts for that player's current visit.
+        # Starting False prevents an old completed 180 already on-screen
+        # when the overlay opens from firing as a new celebration.
+        self._player_180_armed = [False, False]
+
     def connect(self):
         self.browser.connect()
         print("Connected to Scolia.")
@@ -72,6 +78,78 @@ class ScoliaProvider(BaseProvider):
         except Exception:
             self.match.player1_darts_remaining = 0
             self.match.player2_darts_remaining = 0
+
+    @staticmethod
+    def _is_t20_throw(text):
+        """
+        Scolia throw items contain text such as:
+            60
+            T20
+
+        We deliberately require the T20 marker rather than only a numeric
+        score of 60 so a 180 means three actual treble-20 darts.
+        """
+        parts = [
+            part.strip().upper()
+            for part in str(text).replace("\r", "\n").split("\n")
+            if part.strip()
+        ]
+
+        return "T20" in parts
+
+    def _update_180_events(self, page):
+        """
+        Detect a completed Scolia 180 once per visit.
+
+        Scolia exposes three LI elements for each player:
+            li[data-cy='throwsItem_0']
+            li[data-cy='throwsItem_1']
+
+        During a visit those slots fill dart-by-dart. When all three are
+        populated and all three are T20, increment the player's 180 event
+        counter. The overlay watches that counter and plays the visual once.
+        """
+        try:
+            for player_index in (0, 1):
+                throws = page.locator(
+                    f"li[data-cy='throwsItem_{player_index}']"
+                )
+
+                texts = []
+
+                for i in range(min(3, throws.count())):
+                    texts.append(
+                        throws.nth(i).inner_text().strip()
+                    )
+
+                populated = [
+                    text for text in texts if text
+                ]
+
+                # Any incomplete/empty visit arms the next completed visit.
+                if len(populated) < 3:
+                    self._player_180_armed[player_index] = True
+                    continue
+
+                # A completed visit should only be evaluated once.
+                if not self._player_180_armed[player_index]:
+                    continue
+
+                self._player_180_armed[player_index] = False
+
+                if all(
+                    self._is_t20_throw(text)
+                    for text in populated[:3]
+                ):
+                    if player_index == 0:
+                        self.match.player1_180_event += 1
+                        print("Scolia: Player 1 hit a 180.")
+                    else:
+                        self.match.player2_180_event += 1
+                        print("Scolia: Player 2 hit a 180.")
+
+        except Exception as exc:
+            print(f"Scolia 180 detection error: {exc}")
 
     def _update_match_scores(self, page):
         """
@@ -161,6 +239,7 @@ class ScoliaProvider(BaseProvider):
             pass
 
         self._update_darts_remaining(page)
+        self._update_180_events(page)
 
         try:
             stats = page.locator(

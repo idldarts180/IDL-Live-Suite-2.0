@@ -22,6 +22,7 @@ from ui.components.player_name import PlayerName
 from ui.components.score_text import ScoreText
 from ui.components.average_text import AverageText
 from ui.components.checkout_text import CheckoutText
+from ui.components.celebration_180 import Celebration180
 from ui.checkout_engine import get_checkout
 from ui.components.centre_info import CentreInfo
 from ui.components.banner import Banner
@@ -85,6 +86,9 @@ class BroadcastOverlay(ctk.CTk):
         self.left_checkout = CheckoutText(self.canvas)
         self.right_checkout = CheckoutText(self.canvas)
 
+        self.left_180 = Celebration180(self.canvas)
+        self.right_180 = Celebration180(self.canvas)
+
         self.centre_info = CentreInfo(self.canvas)
         self.banner = Banner(self.canvas)
 
@@ -101,6 +105,10 @@ class BroadcastOverlay(ctk.CTk):
         # ==========================================
 
         self.items = {}
+
+        # Track provider event counters so each 180 celebration fires once.
+        self._last_180_events = [0, 0]
+        self._celebrating_180 = [False, False]
 
         # ==========================================
         # Layout Editor
@@ -173,10 +181,69 @@ class BroadcastOverlay(ctk.CTk):
 
     # ======================================================
 
+    def _start_180_celebration(self, player_index):
+        """
+        Temporarily replace the player's remaining score with the gold
+        180 visual, pulse it, then reveal the updated remaining score.
+        """
+
+        if self._celebrating_180[player_index]:
+            return
+
+        self._celebrating_180[player_index] = True
+
+        if player_index == 0:
+            score_item = self.items["left_score"]
+            visual = self.left_180
+        else:
+            score_item = self.items["right_score"]
+            visual = self.right_180
+
+        # Hide score, show 180, give it a short punch animation.
+        self.canvas.itemconfigure(score_item, state="hidden")
+        visual.show()
+
+        self.after(90, visual.set_large)
+        self.after(220, visual.set_normal)
+
+        # Hold long enough to register visually, then reveal new score.
+        self.after(
+            1500,
+            lambda index=player_index: self._finish_180_celebration(index)
+        )
+
+    def _finish_180_celebration(self, player_index):
+        if player_index == 0:
+            score_item = self.items["left_score"]
+            visual = self.left_180
+        else:
+            score_item = self.items["right_score"]
+            visual = self.right_180
+
+        visual.hide()
+        self.canvas.itemconfigure(score_item, state="normal")
+        self._celebrating_180[player_index] = False
+
+    def _check_180_events(self, match):
+        current_events = [
+            getattr(match, "player1_180_event", 0),
+            getattr(match, "player2_180_event", 0),
+        ]
+
+        for index, event_value in enumerate(current_events):
+            if event_value > self._last_180_events[index]:
+                self._last_180_events[index] = event_value
+                self._start_180_celebration(index)
+            elif event_value < self._last_180_events[index]:
+                # Defensive reset if a provider/model is restarted.
+                self._last_180_events[index] = event_value
+
     def set_match(self, match):
         """
         Apply a Match model to the persistent overlay components.
         """
+
+        self._check_180_events(match)
 
         self.left_name.update(
             getattr(match, "player1_name", "Player 1")
@@ -409,6 +476,20 @@ class BroadcastOverlay(ctk.CTk):
             right_score_pos["x"],
             right_score_pos["y"],
             501
+        )
+
+        # =====================================
+        # 180 Celebration Visuals
+        # =====================================
+
+        self.items["left_180"] = self.left_180.draw(
+            left_score_pos["x"],
+            left_score_pos["y"]
+        )
+
+        self.items["right_180"] = self.right_180.draw(
+            right_score_pos["x"],
+            right_score_pos["y"]
         )
 
         # =====================================

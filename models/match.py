@@ -27,6 +27,7 @@ class Match:
         self.player1_legs = 0
         self.player1_sets = 0
         self.player1_darts_remaining = 3
+        self.player1_180_event = 0
 
         # -------------------------
         # Player 2
@@ -40,6 +41,7 @@ class Match:
         self.player2_legs = 0
         self.player2_sets = 0
         self.player2_darts_remaining = 3
+        self.player2_180_event = 0
 
         # -------------------------
         # Match Information
