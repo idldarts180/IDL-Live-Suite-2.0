@@ -421,7 +421,15 @@ class BroadcastOverlay(ctk.CTk):
                 "right_checkout",
             )
 
+        if player_index == 0:
+            self.left_name.hide()
+        else:
+            self.right_name.hide()
+
         for key in keys:
+            if key in ("left_name", "right_name"):
+                continue
+
             item = self.items.get(key)
             if item is not None:
                 self.canvas.itemconfigure(item, state="hidden")
@@ -442,7 +450,15 @@ class BroadcastOverlay(ctk.CTk):
                 "right_checkout",
             )
 
+        if player_index == 0:
+            self.left_name.show()
+        else:
+            self.right_name.show()
+
         for key in keys:
+            if key in ("left_name", "right_name"):
+                continue
+
             item = self.items.get(key)
             if item is not None:
                 self.canvas.itemconfigure(item, state="normal")
@@ -549,17 +565,13 @@ class BroadcastOverlay(ctk.CTk):
 
     def _reset_final_result_if_new_match(self, match):
         """
-        Release the final-result lock only when the provider explicitly says
-        that a live scoring screen is active again.
+        Release the locked final result when a genuinely new live match begins.
 
-        DartCounter now marks match.match_active=True after it has successfully
-        parsed a live scoring screen. That makes Rematch/new-game detection
-        reliable without confusing the completed result screen for a new match.
+        DartCounter explicitly marks its live scoring state with match_active.
+        Scolia does not, so a fresh Scolia match is recognised when both players
+        are back above zero with legs and sets reset to 0-0.
         """
         if self._final_result is None:
-            return
-
-        if not bool(getattr(match, "match_active", False)):
             return
 
         scores = [
@@ -567,10 +579,36 @@ class BroadcastOverlay(ctk.CTk):
             int(getattr(match, "player2_score", 501) or 0),
         ]
 
-        # A real new live game has both players back in play. Do not require
-        # legs/sets to be exactly 0 here because DartCounter can populate those
-        # a fraction of a second later than the score panel.
-        if not (scores[0] > 0 and scores[1] > 0):
+        legs = [
+            int(getattr(match, "player1_legs", 0) or 0),
+            int(getattr(match, "player2_legs", 0) or 0),
+        ]
+
+        sets = [
+            int(getattr(match, "player1_sets", 0) or 0),
+            int(getattr(match, "player2_sets", 0) or 0),
+        ]
+
+        provider = str(
+            getattr(match, "provider", self.provider_name) or ""
+        ).strip().lower()
+
+        dartcounter_live = (
+            provider == "dartcounter"
+            and bool(getattr(match, "match_active", False))
+            and scores[0] > 0
+            and scores[1] > 0
+        )
+
+        scolia_live = (
+            provider == "scolia"
+            and scores[0] > 0
+            and scores[1] > 0
+            and legs == [0, 0]
+            and sets == [0, 0]
+        )
+
+        if not (dartcounter_live or scolia_live):
             return
 
         self._final_result = None
@@ -579,13 +617,19 @@ class BroadcastOverlay(ctk.CTk):
         self._cached_leg_target = None
         self._cached_set_target = None
 
-        # Consume the provider's current winner-event counter so the previous
-        # game's WINNER event cannot replay in the new match.
         self._last_match_winner_event = int(
             getattr(match, "match_winner_event", 0) or 0
         )
 
-        print("Overlay: new live match detected - final result lock cleared.")
+        self._last_180_events = [
+            int(getattr(match, "player1_180_event", 0) or 0),
+            int(getattr(match, "player2_180_event", 0) or 0),
+        ]
+
+        print(
+            f"Overlay: new {provider or 'live'} match detected - "
+            "final result lock cleared."
+        )
 
     def _lock_final_result(self, match, winner_index):
         """

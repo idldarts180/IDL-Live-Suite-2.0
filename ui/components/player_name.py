@@ -205,6 +205,26 @@ class PlayerName:
 
     # ======================================================
 
+    def hide(self):
+        """Hide both lines of a stacked player name."""
+        if self.item is not None:
+            self.canvas.itemconfigure(self.item, state="hidden")
+
+        if self.second_item is not None:
+            self.canvas.itemconfigure(self.second_item, state="hidden")
+
+    # ======================================================
+
+    def show(self):
+        """Restore both lines of a stacked player name."""
+        if self.item is not None:
+            self.canvas.itemconfigure(self.item, state="normal")
+
+        if self.second_item is not None:
+            self.canvas.itemconfigure(self.second_item, state="normal")
+
+    # ======================================================
+
     def update(self, name):
         if self.item is None:
             return
