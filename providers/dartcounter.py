@@ -47,6 +47,20 @@ class DartCounterProvider(BaseProvider):
         self._last_active_player_index = None
         self._end_screen_handled = False
 
+        # DartCounter can briefly hand the "turn to throw" marker to the other
+        # player after the winning submit, just before it navigates to the
+        # Rematch/View details screen. If we blindly use that new marker, the
+        # wrong player can be announced as the winner.
+        #
+        # Keep the player who just handed over the turn as a short-lived winner
+        # candidate. If that player was sitting on a valid checkout score and
+        # the result screen follows immediately, that player made the winning
+        # checkout.
+        self._update_serial = 0
+        self._last_turn_handoff_player_index = None
+        self._last_turn_handoff_score = None
+        self._last_turn_handoff_serial = None
+
         # One-shot diagnostic state. After we have definitely seen a live match,
         # dump every DartCounter page the first time the live parser disappears.
         # This tells us exactly what DartCounter renders after the winning dart.
@@ -525,6 +539,20 @@ class DartCounterProvider(BaseProvider):
             self._previous_scores[index] = current
 
     @staticmethod
+    def _is_checkout_score(score):
+        """Return True when a remaining score can be finished in one visit."""
+        try:
+            score = int(score)
+        except (TypeError, ValueError):
+            return False
+
+        if score < 2 or score > 170:
+            return False
+
+        # Standard impossible three-dart finishes ("bogey numbers").
+        return score not in {169, 168, 166, 165, 163, 162, 159}
+
+    @staticmethod
     def _normalise_name(value):
         return " ".join(
             str(value).strip().upper().split()
@@ -599,6 +627,25 @@ class DartCounterProvider(BaseProvider):
 
             if resolved in (0, 1):
                 if resolved != self._last_active_player_index:
+                    previous_index = self._last_active_player_index
+
+                    if previous_index in (0, 1):
+                        previous_score = (
+                            self.match.player1_score
+                            if previous_index == 0
+                            else self.match.player2_score
+                        )
+
+                        self._last_turn_handoff_player_index = previous_index
+                        self._last_turn_handoff_score = previous_score
+                        self._last_turn_handoff_serial = self._update_serial
+
+                        print(
+                            "DartCounter: turn handed over from "
+                            f"Player {previous_index + 1} "
+                            f"on {previous_score}."
+                        )
+
                     print(
                         "DartCounter: active player -> "
                         f"Player {resolved + 1} ({active_name})"
@@ -611,10 +658,37 @@ class DartCounterProvider(BaseProvider):
 
     def _winner_index_from_active_name(self):
         """
-        The active player index is resolved while the live score screen is
-        still visible. Carry that exact slot across the instant navigation to
-        DartCounter's Rematch/View details screen.
+        Resolve the DartCounter winner across the instant navigation to the
+        Rematch/View details screen.
+
+        DartCounter can briefly flip the active-player marker to the opponent
+        after the winning dart. When that happens, the player who just handed
+        over the turn is the correct winner if they were on a valid checkout
+        score immediately beforehand.
         """
+        handoff_index = self._last_turn_handoff_player_index
+        handoff_score = self._last_turn_handoff_score
+        handoff_serial = self._last_turn_handoff_serial
+
+        handoff_is_recent = (
+            handoff_index in (0, 1)
+            and handoff_serial is not None
+            and (self._update_serial - handoff_serial) <= 8
+        )
+
+        if (
+            handoff_is_recent
+            and self._is_checkout_score(handoff_score)
+        ):
+            print(
+                "DartCounter: winner resolved from final turn handoff -> "
+                f"Player {handoff_index + 1} "
+                f"(checkout score was {handoff_score})."
+            )
+            return handoff_index
+
+        # Normal case: DartCounter leaves the winning player marked as active
+        # until the result screen appears.
         if self._last_active_player_index in (0, 1):
             return self._last_active_player_index
 
@@ -794,6 +868,8 @@ class DartCounterProvider(BaseProvider):
 
     def update(self):
 
+        self._update_serial += 1
+
         page = self._get_page()
 
         if page is None:
@@ -819,11 +895,20 @@ class DartCounterProvider(BaseProvider):
                 # We are definitely back on a live scoring screen. This is
                 # important after Rematch/new game because the overlay can now
                 # safely release its locked final result.
+                was_inactive = not bool(
+                    getattr(self.match, "match_active", False)
+                )
+
                 self.match.match_active = True
                 self.match.match_winner_player = None
                 self._end_screen_handled = False
                 self._saw_live_match = True
                 self._post_match_dumped = False
+
+                if was_inactive:
+                    self._last_turn_handoff_player_index = None
+                    self._last_turn_handoff_score = None
+                    self._last_turn_handoff_serial = None
             else:
                 body_upper = body_text.upper()
 
