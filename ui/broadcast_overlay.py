@@ -53,7 +53,7 @@ class BroadcastOverlay(ctk.CTk):
 
         self.provider_name = provider_name.lower().strip()
 
-        self.title("IDL Live Suite")
+        self.title("IDL Broadcast Overlay")
         self.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
 
         # ==========================================
