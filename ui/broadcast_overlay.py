@@ -558,8 +558,13 @@ class BroadcastOverlay(ctk.CTk):
         leg_target = self._cached_leg_target
         set_target = self._cached_set_target
 
+        # Some providers clear/reset is_set_play on the final navigation.
+        # Keep set-play mode if we already cached a set target earlier in the
+        # match, or if the surviving format text still says SET/SETS.
         is_set_play = bool(
             getattr(match, "is_set_play", False)
+            or self._cached_set_target is not None
+            or "SET" in format_text.upper()
         )
 
         scores = [
