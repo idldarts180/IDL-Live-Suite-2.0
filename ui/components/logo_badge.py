@@ -3,10 +3,10 @@ IDL Live Suite
 Logo Badge
 """
 
-import os
 from PIL import Image, ImageTk
 
 from ui.layout_manager import LayoutManager
+from ui.app_paths import LOGOS_DIR
 
 
 class LogoBadge:
@@ -17,11 +17,7 @@ class LogoBadge:
 
         self.layout = LayoutManager()
 
-        image_path = os.path.join(
-            "assets",
-            "logos",
-            "idl.png"
-        )
+        image_path = LOGOS_DIR / "idl.png"
 
         self.image = Image.open(image_path)
 
@@ -39,16 +35,11 @@ class LogoBadge:
         logo = self.layout.get("logo")
 
         item = self.canvas.create_image(
-
             logo["x"],
             logo["y"],
-
             image=self.photo,
-
             anchor="center",
-
             tags="logo"
-
         )
 
         return item

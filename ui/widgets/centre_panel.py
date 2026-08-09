@@ -7,6 +7,8 @@ Version 3.0
 import customtkinter as ctk
 from PIL import Image
 
+from ui.app_paths import LOGOS_DIR
+
 
 class CentrePanel(ctk.CTkFrame):
 
@@ -21,9 +23,11 @@ class CentrePanel(ctk.CTkFrame):
         # Logo
         # =====================================
 
+        logo_path = LOGOS_DIR / "idl.png"
+
         logo = ctk.CTkImage(
-            light_image=Image.open("assets/logos/idl.png"),
-            dark_image=Image.open("assets/logos/idl.png"),
+            light_image=Image.open(logo_path),
+            dark_image=Image.open(logo_path),
             size=(120, 120)
         )
 
