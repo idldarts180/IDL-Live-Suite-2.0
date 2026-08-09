@@ -35,6 +35,10 @@ from controllers.match_controller import MatchController
 
 APP_ICON = ICONS_DIR / "idl_live_suite.ico"
 
+# Windows colour-key transparency.
+# Use a colour that is extremely unlikely to occur in the actual overlay art.
+TRANSPARENT_KEY = "#010203"
+
 
 class BroadcastOverlay(ctk.CTk):
 
@@ -51,8 +55,31 @@ class BroadcastOverlay(ctk.CTk):
 
         self.title("IDL Live Suite")
         self.geometry(f"{WINDOW_WIDTH}x{WINDOW_HEIGHT}")
-        self.configure(fg_color=BACKGROUND)
+
+        # ==========================================
+        # Stream-friendly window
+        # ==========================================
+        #
+        # Keep the existing 1200x420 coordinate system so none of the overlay
+        # positioning changes, but remove the Windows frame/title bar and make
+        # the unused canvas background transparent.
+        self.overrideredirect(True)
         self.resizable(False, False)
+
+        self.configure(fg_color=TRANSPARENT_KEY)
+
+        try:
+            self.wm_attributes(
+                "-transparentcolor",
+                TRANSPARENT_KEY
+            )
+        except tk.TclError:
+            # Colour-key transparency is Windows-specific. If unavailable,
+            # the overlay still runs normally with the keyed background.
+            pass
+
+        # ESC gives us a simple way to close the now-borderless overlay.
+        self.bind("<Escape>", lambda event: self.close_overlay())
 
         # ==========================================
         # Canvas
@@ -62,13 +89,31 @@ class BroadcastOverlay(ctk.CTk):
             self,
             width=WINDOW_WIDTH,
             height=WINDOW_HEIGHT,
-            bg=BACKGROUND,
-            highlightthickness=0
+            bg=TRANSPARENT_KEY,
+            highlightthickness=0,
+            bd=0
         )
 
         self.canvas.pack(
             fill="both",
             expand=True
+        )
+
+        # ==========================================
+        # Window dragging
+        # ==========================================
+        # The overlay is borderless, so there is no Windows title bar to drag.
+        # Click and drag anywhere on the visible overlay artwork to move it.
+        self._drag_offset_x = 0
+        self._drag_offset_y = 0
+
+        self.canvas.bind(
+            "<ButtonPress-1>",
+            self._start_window_drag
+        )
+        self.canvas.bind(
+            "<B1-Motion>",
+            self._drag_window
         )
 
         # ==========================================
@@ -166,6 +211,22 @@ class BroadcastOverlay(ctk.CTk):
 
         # Clean up browser when overlay closes.
         self.protocol("WM_DELETE_WINDOW", self.close_overlay)
+
+    # ======================================================
+    # Borderless Window Dragging
+    # ======================================================
+
+    def _start_window_drag(self, event):
+        """Remember where inside the overlay the drag started."""
+        self._drag_offset_x = event.x_root - self.winfo_x()
+        self._drag_offset_y = event.y_root - self.winfo_y()
+
+    def _drag_window(self, event):
+        """Move the borderless overlay while the left mouse button is held."""
+        x = event.x_root - self._drag_offset_x
+        y = event.y_root - self._drag_offset_y
+
+        self.geometry(f"+{x}+{y}")
 
     # ======================================================
     # Live Provider
