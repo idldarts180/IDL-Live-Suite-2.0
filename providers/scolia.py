@@ -1,7 +1,7 @@
 """
 IDL Live Suite
 Scolia Provider
-Version 2.3 - Correct active-player dart tracking
+Version 2.4 - Aborted match session reset
 """
 
 from providers.base_provider import BaseProvider
@@ -22,6 +22,14 @@ class ScoliaProvider(BaseProvider):
         self.match.player1_darts_remaining = 0
         self.match.player2_darts_remaining = 0
 
+        # Shared live-session state used by the broadcast overlay.
+        self.match.match_active = False
+        self.match.match_session_event = 0
+        self.match.match_winner_event = getattr(
+            self.match, "match_winner_event", 0
+        )
+        self.match.match_winner_player = None
+
         self.browser = Browser(
             profile="browser/profile",
             url="https://game.scoliadarts.com/game"
@@ -29,9 +37,11 @@ class ScoliaProvider(BaseProvider):
 
         # A player becomes armed for a new 180 only after Scolia shows
         # fewer than three populated darts for that player's current visit.
-        # Starting False prevents an old completed 180 already on-screen
-        # when the overlay opens from firing as a new celebration.
         self._player_180_armed = [False, False]
+
+        # Scolia can briefly redraw its live DOM. Require several consecutive
+        # missing-live frames before calling the match aborted/left.
+        self._non_live_updates = 0
 
     def connect(self):
         self.browser.connect()
@@ -40,16 +50,37 @@ class ScoliaProvider(BaseProvider):
     def wait_for_match(self):
         input("\nOpen your Scolia match then press ENTER...")
 
+    def _mark_match_aborted_or_left(self):
+        if not bool(getattr(self.match, "match_active", False)):
+            return
+
+        print(
+            "Scolia: live match left/aborted - "
+            "waiting for a new match."
+        )
+
+        self.match.match_active = False
+        self.match.match_winner_player = None
+
+        self.match.player1_darts_remaining = 0
+        self.match.player2_darts_remaining = 0
+
+        self._player_180_armed = [False, False]
+        self._non_live_updates = 0
+
+    def _note_non_live_update(self):
+        if not bool(getattr(self.match, "match_active", False)):
+            return
+
+        self._non_live_updates += 1
+
+        if self._non_live_updates >= 4:
+            self._mark_match_aborted_or_left()
+
     def _update_darts_remaining(self, page):
         """
         Detect darts remaining independently for each player.
-
-        Each player's scores/history container owns its own checkout
-        suggestion placeholders. Counting those placeholders avoids relying
-        on the 'SWITCH PLAYER' text, which is not a reliable active-player
-        marker for both sides.
         """
-
         try:
             player_areas = page.locator(
                 "div.styles_scoresAndHistoryContainerMultiple__j8x8N"
@@ -81,14 +112,6 @@ class ScoliaProvider(BaseProvider):
 
     @staticmethod
     def _is_t20_throw(text):
-        """
-        Scolia throw items contain text such as:
-            60
-            T20
-
-        We deliberately require the T20 marker rather than only a numeric
-        score of 60 so a 180 means three actual treble-20 darts.
-        """
         parts = [
             part.strip().upper()
             for part in str(text).replace("\r", "\n").split("\n")
@@ -98,17 +121,6 @@ class ScoliaProvider(BaseProvider):
         return "T20" in parts
 
     def _update_180_events(self, page):
-        """
-        Detect a completed Scolia 180 once per visit.
-
-        Scolia exposes three LI elements for each player:
-            li[data-cy='throwsItem_0']
-            li[data-cy='throwsItem_1']
-
-        During a visit those slots fill dart-by-dart. When all three are
-        populated and all three are T20, increment the player's 180 event
-        counter. The overlay watches that counter and plays the visual once.
-        """
         try:
             for player_index in (0, 1):
                 throws = page.locator(
@@ -126,12 +138,10 @@ class ScoliaProvider(BaseProvider):
                     text for text in texts if text
                 ]
 
-                # Any incomplete/empty visit arms the next completed visit.
                 if len(populated) < 3:
                     self._player_180_armed[player_index] = True
                     continue
 
-                # A completed visit should only be evaluated once.
                 if not self._player_180_armed[player_index]:
                     continue
 
@@ -152,13 +162,6 @@ class ScoliaProvider(BaseProvider):
             print(f"Scolia 180 detection error: {exc}")
 
     def _update_match_scores(self, page):
-        """
-        Read labelled SETS / LEGS score blocks from Scolia.
-
-        In normal leg play Scolia exposes LEGS only.
-        In set play it can expose both SETS and LEGS. We inspect the
-        labels rather than relying on a fixed value order.
-        """
         try:
             score_blocks = page.locator(
                 "div.styles_score__AKlWV"
@@ -209,32 +212,66 @@ class ScoliaProvider(BaseProvider):
     def update(self):
         page = self.browser.page
 
+        if page is None:
+            self._note_non_live_update()
+            return
+
         try:
             names = page.locator(
                 "div.styles_nickname__uBJfP"
             )
 
-            if names.count() >= 2:
-                self.match.player1_name = names.nth(0).inner_text().strip()
-                self.match.player2_name = names.nth(1).inner_text().strip()
-
-        except Exception:
-            pass
-
-        try:
             scores = page.locator(
                 "span.styles_counter__ZHHHQ"
             )
 
-            if scores.count() >= 2:
-                self.match.player1_score = int(
-                    scores.nth(0).inner_text()
-                )
+            live_match_visible = (
+                names.count() >= 2
+                and scores.count() >= 2
+            )
 
-                self.match.player2_score = int(
-                    scores.nth(1).inner_text()
-                )
+        except Exception:
+            live_match_visible = False
 
+        if not live_match_visible:
+            self._note_non_live_update()
+            return
+
+        # A genuine live match is visible again.
+        was_inactive = not bool(
+            getattr(self.match, "match_active", False)
+        )
+
+        self._non_live_updates = 0
+        self.match.match_active = True
+        self.match.match_winner_player = None
+
+        if was_inactive:
+            self.match.match_session_event += 1
+
+            # Do not let completed throw slots from the previous game trigger
+            # a celebration in the new one.
+            self._player_180_armed = [False, False]
+
+            print(
+                "Scolia: new live match session -> "
+                f"{self.match.match_session_event}"
+            )
+
+        try:
+            self.match.player1_name = names.nth(0).inner_text().strip()
+            self.match.player2_name = names.nth(1).inner_text().strip()
+        except Exception:
+            pass
+
+        try:
+            self.match.player1_score = int(
+                scores.nth(0).inner_text()
+            )
+
+            self.match.player2_score = int(
+                scores.nth(1).inner_text()
+            )
         except Exception:
             pass
 
@@ -281,10 +318,6 @@ class ScoliaProvider(BaseProvider):
 
         except Exception:
             pass
-
-        # =====================================
-        # Match Score (Sets / Legs)
-        # =====================================
 
         self._update_match_scores(page)
 

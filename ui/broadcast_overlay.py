@@ -185,6 +185,10 @@ class BroadcastOverlay(ctk.CTk):
         self._winner_fired = [False, False]
         self._last_match_winner_event = 0
 
+        # Providers increment this every time a genuinely new live match starts.
+        # Unlike final-result detection, it also covers aborted matches.
+        self._last_match_session_event = 0
+
         # Once a match winner is known, keep the overlay on the true final
         # result even if Scolia/DartCounter immediately leave the live scoring
         # screen and continue returning stale pre-finish values.
@@ -561,6 +565,90 @@ class BroadcastOverlay(ctk.CTk):
             self,
             "_active_result_kind_" + str(player_index),
             None
+        )
+
+    def _reset_for_new_match_session(self, match):
+        """
+        Reset all provider-independent overlay state when a provider reports a
+        genuinely new live match session.
+
+        This is the important path for:
+            live match -> abort/leave -> new match
+
+        No winner is invented for the aborted match. The next live session just
+        starts with clean celebration/progress/final-result state.
+        """
+        session_event = int(
+            getattr(match, "match_session_event", 0) or 0
+        )
+
+        if session_event == self._last_match_session_event:
+            return
+
+        # Defensive sync if a provider/controller is ever restarted.
+        if session_event < self._last_match_session_event:
+            self._last_match_session_event = session_event
+            return
+
+        self._last_match_session_event = session_event
+
+        # Cancel any delayed LEG WIN jobs.
+        for player_index in (0, 1):
+            self._cancel_pending_leg(player_index)
+
+        # Cancel/clear any currently running result celebration.
+        for player_index in (0, 1):
+            job = self._result_finish_jobs[player_index]
+
+            if job is not None:
+                try:
+                    self.after_cancel(job)
+                except Exception:
+                    pass
+
+            self._result_finish_jobs[player_index] = None
+            self._result_celebrating[player_index] = False
+            self._celebrating_180[player_index] = False
+
+            setattr(
+                self,
+                "_active_result_kind_" + str(player_index),
+                None
+            )
+
+            if player_index == 0:
+                self.left_result.hide()
+                self.left_180.hide()
+            else:
+                self.right_result.hide()
+                self.right_180.hide()
+
+            self._restore_player_text(player_index)
+
+        self._final_result = None
+        self._winner_fired = [False, False]
+        self._last_progress = None
+        self._cached_leg_target = None
+        self._cached_set_target = None
+
+        # Consume the provider's current event counters so events from the
+        # abandoned/previous game cannot replay in this new one.
+        self._last_match_winner_event = int(
+            getattr(match, "match_winner_event", 0) or 0
+        )
+
+        self._last_180_events = [
+            int(getattr(match, "player1_180_event", 0) or 0),
+            int(getattr(match, "player2_180_event", 0) or 0),
+        ]
+
+        provider = str(
+            getattr(match, "provider", self.provider_name) or ""
+        ).strip().lower()
+
+        print(
+            f"Overlay: new {provider or 'live'} match session detected - "
+            "all previous match state cleared."
         )
 
     def _reset_final_result_if_new_match(self, match):
@@ -950,6 +1038,12 @@ class BroadcastOverlay(ctk.CTk):
         of stale provider values returned after the scoring page disappears.
         """
 
+        # Session-event reset comes first so an aborted/left match cannot
+        # contaminate the next game's progress, winner or celebration state.
+        self._reset_for_new_match_session(match)
+
+        # Keep the older final-result reset as a fallback for providers/builds
+        # that do not expose match_session_event.
         self._reset_final_result_if_new_match(match)
 
         self._check_result_events(match)

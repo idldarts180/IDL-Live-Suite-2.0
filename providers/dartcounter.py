@@ -67,10 +67,20 @@ class DartCounterProvider(BaseProvider):
         self._saw_live_match = False
         self._post_match_dumped = False
 
-        # Explicit event consumed by the overlay.
+        # Explicit events/state consumed by the overlay.
         self.match.match_winner_event = 0
         self.match.match_winner_player = None
         self.match.match_active = False
+
+        # Incremented every time a genuinely new live match begins.
+        # This lets the overlay reset cleanly after an aborted match as well
+        # as after a normally completed match.
+        self.match.match_session_event = 0
+
+        # A live page can briefly reflow during normal scoring, so do not call
+        # a single failed parse an abort. Four consecutive misses at the normal
+        # 250 ms overlay polling rate is roughly one second.
+        self._non_live_updates = 0
 
     # ======================================================
     # Connection
@@ -862,6 +872,53 @@ class DartCounterProvider(BaseProvider):
         print("=" * 70)
         print("")
 
+    def _mark_match_aborted_or_left(self):
+        """
+        Mark the current live DartCounter match as no longer active without
+        producing a winner event.
+
+        This is used when the scoring DOM disappears but DartCounter is NOT on
+        its normal Rematch / View details completed-match screen.
+        """
+        if not bool(getattr(self.match, "match_active", False)):
+            return
+
+        print(
+            "DartCounter: live match left/aborted - "
+            "waiting for a new match."
+        )
+
+        self.match.match_active = False
+        self.match.match_winner_player = None
+
+        self._cached_player_names = [None, None]
+        self._previous_scores = [None, None]
+
+        self._last_active_player_name = None
+        self._last_active_player_index = None
+
+        self._last_turn_handoff_player_index = None
+        self._last_turn_handoff_score = None
+        self._last_turn_handoff_serial = None
+
+        self._end_screen_handled = False
+        self._saw_live_match = False
+        self._post_match_dumped = False
+        self._non_live_updates = 0
+
+    def _note_non_live_update(self):
+        """
+        Debounce temporary DartCounter DOM reflows before treating the live
+        match as aborted/left.
+        """
+        if not bool(getattr(self.match, "match_active", False)):
+            return
+
+        self._non_live_updates += 1
+
+        if self._non_live_updates >= 4:
+            self._mark_match_aborted_or_left()
+
     # ======================================================
     # Live Update
     # ======================================================
@@ -873,6 +930,7 @@ class DartCounterProvider(BaseProvider):
         page = self._get_page()
 
         if page is None:
+            self._note_non_live_update()
             return
 
         # Capture the active thrower continuously. This survives the final
@@ -899,6 +957,7 @@ class DartCounterProvider(BaseProvider):
                     getattr(self.match, "match_active", False)
                 )
 
+                self._non_live_updates = 0
                 self.match.match_active = True
                 self.match.match_winner_player = None
                 self._end_screen_handled = False
@@ -906,9 +965,16 @@ class DartCounterProvider(BaseProvider):
                 self._post_match_dumped = False
 
                 if was_inactive:
+                    self.match.match_session_event += 1
+
                     self._last_turn_handoff_player_index = None
                     self._last_turn_handoff_score = None
                     self._last_turn_handoff_serial = None
+
+                    print(
+                        "DartCounter: new live match session -> "
+                        f"{self.match.match_session_event}"
+                    )
             else:
                 body_upper = body_text.upper()
 
@@ -929,6 +995,7 @@ class DartCounterProvider(BaseProvider):
                 )
 
                 if is_completed_match:
+                    self._non_live_updates = 0
                     self.match.match_active = False
 
                     if not self._end_screen_handled:
@@ -977,6 +1044,11 @@ class DartCounterProvider(BaseProvider):
 
                 if self._saw_live_match:
                     self._dump_pages_after_live_match()
+
+                # If this was a live match and we have left it without reaching
+                # the normal result screen, treat it as aborted/left after a
+                # short debounce. No winner event is fired.
+                self._note_non_live_update()
 
         except Exception as exc:
             print(f"DartCounter update error: {exc}")
